@@ -15,3 +15,21 @@
 		}
 	]
 }
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "debugpy",
+            "request": "launch",
+            "name": "Launch Flask Backend",
+            "program": "${workspaceFolder}/backend/app.py",
+            "envFile": "${workspaceFolder}/.env",
+            "args": [
+                "run",
+                "--no-debugger",
+                "--no-reload"
+            ],
+            "console": "integratedTerminal"
+        }
+    ]
+}
