@@ -1,5 +1,6 @@
 import aiohttp
 import asyncio
+import backoff
 from bs4 import BeautifulSoup
 import requests
 import time
@@ -7,7 +8,47 @@ import random
 import logging
 from models.property import Property
 
+import aiohttp
+import asyncio
+import backoff
+import random
+import time
+
+class ZillowScraper:
+    # ... existing code ...
+    
+    @backoff.on_exception(backoff.expo, 
+                         (aiohttp.ClientError, asyncio.TimeoutError),
+                         max_tries=3)
+    async def _fetch_page(self, session, url):
+        # Add random delay to respect rate limits
+        await asyncio.sleep(random.uniform(1.5, 3.5))
+        async with session.get(url, headers=self.headers, timeout=10) as response:
+            if response.status != 200:
+                logger.warning(f"Non-200 status code {response.status} for {url}")
+                return None
+            return await response.text()
+
 logger = logging.getLogger(__name__)
+
+class ZillowScraper:
+    def __init__(self):
+        self.base_url = "https://www.zillow.com"
+        self.user_agents = [
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36',
+            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36',
+            # Add more user agents for rotation
+        ]
+        
+    def _get_headers(self):
+        return {
+            'User-Agent': random.choice(self.user_agents),
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1'
+        }
 
 class ZillowScraper:
     def __init__(self):

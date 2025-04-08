@@ -1,6 +1,7 @@
 from datetime import datetime
 from utils.database import get_db
 import logging
+from bson import ObjectId   # Import ObjectId for MongoDB document IDs
 
 logger = logging.getLogger(__name__)
 
@@ -59,10 +60,12 @@ class Property:
     @classmethod
     def find_by_id(cls, property_id):
         db = get_db()
+        if isinstance(property_id, str):
+            property_id = ObjectId(property_id)  # Convert string ID to ObjectId if necessary
         property_data = db[cls.collection_name].find_one({'_id': property_id})
         if property_data:
             return cls.from_dict(property_data)
-        return None
+        return None  
 
     @classmethod
     def find_all(cls, filters=None, limit=100, skip=0):

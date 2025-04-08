@@ -8,6 +8,7 @@ from services.analysis.financing_options import FinancingOptions
 from bson import ObjectId
 import traceback
 import json
+from bson import ObjectId
 
 class PropertyListResource(Resource):
     def get(self):

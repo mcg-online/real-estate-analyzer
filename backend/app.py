@@ -3,6 +3,10 @@ from flask_restful import Api
 from flask_jwt_extended import JWTManager
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from flask_caching import Cache
+import threading
+import time
+from routes.analysis import PropertyAnalysisResource, MarketAnalysisResource, TopMarketsResource
 from dotenv import load_dotenv
 import os
 import logging
@@ -14,6 +18,7 @@ from routes.analysis import AnalysisResource
 from routes.users import UserRegistration, UserLogin, UserLogout
 from utils.database import init_db, close_db
 from services.scheduler import update_property_data, update_market_data  # Import both functions
+
 # Load environment variables
 load_dotenv()
 
@@ -35,6 +40,10 @@ api.add_resource(AnalysisResource, '/api/analysis/<property_id>')
 api.add_resource(UserRegistration, '/api/auth/register')
 api.add_resource(UserLogin, '/api/auth/login')
 api.add_resource(UserLogout, '/api/auth/logout')
+# Fix route registration for analysis endpoints
+api.add_resource(PropertyAnalysisResource, '/api/analysis/property/<property_id>')
+api.add_resource(MarketAnalysisResource, '/api/analysis/market/<market_id>')
+api.add_resource(TopMarketsResource, '/api/markets/top')
 
 @app.route('/')
 def home():
@@ -135,3 +144,37 @@ def get_properties():
             p['_id'] = str(p['_id'])
     
     return jsonify(properties_json)
+
+# Add proper shutdown handling for scheduler
+scheduler_thread = None
+
+def run_scheduled_tasks():
+    """Run scheduled tasks in background thread"""
+    def run_schedule():
+        while True:
+            try:
+                schedule.run_pending()
+                time.sleep(60)
+            except Exception as e:
+                logger.error(f"Error in scheduler: {e}")
+                time.sleep(300)  # Wait 5 minutes on error
+    
+    # Schedule data update tasks
+    schedule.every().day.at("01:00").do(update_property_data)
+    schedule.every().week.do(update_market_data)
+    
+    # Start scheduler in separate thread
+    scheduler_thread = threading.Thread(target=run_schedule)
+    scheduler_thread.daemon = True
+    scheduler_thread.start()
+    return scheduler_thread
+
+@app.before_first_request
+def initialize_scheduler():
+    global scheduler_thread
+    scheduler_thread = run_scheduled_tasks()
+
+@app.teardown_appcontext
+def shutdown(exception=None):
+    close_db()
+    # No need to stop the scheduler thread as it's a daemon thread

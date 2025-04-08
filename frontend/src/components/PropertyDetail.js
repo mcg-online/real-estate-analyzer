@@ -79,21 +79,18 @@ const PropertyDetail = () => {
     }
   };
 
+  // Example fix for loading state in PropertyDetail.js
   if (isLoading) {
-    return 
-      
-    ;
+   return <div className="text-center py-10">Loading property details...</div>;
   }
 
   if (error) {
-    return {error};
+    return <div className="text-center py-10 text-red-600">{error}</div>;
   }
 
   if (!property || !analysis) {
-    return Property not found.;
+    return <div className="text-center py-10">Property not found.</div>;
   }
-
-  return (
     
       
         

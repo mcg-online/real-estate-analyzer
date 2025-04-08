@@ -240,6 +240,11 @@ const MarketMetricsChart = ({ properties }) => {
   };
 
   return (
+    <div
+      ref={mapRef}
+      syle={{ height: '400px', width: '100%' }}
+      className="rounded-lg shadow-lg overflow-hidden bg-white"
+    >
     
       
     

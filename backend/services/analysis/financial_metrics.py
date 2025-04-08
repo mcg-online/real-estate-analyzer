@@ -121,26 +121,39 @@ class FinancialMetrics:
         }
         
     def calculate_break_even_point(self, monthly_rent, monthly_expenses, mortgage_payment):
-        """Calculate the break-even point in years"""
+    """Calculate the break-even point in years"""
         monthly_cash_flow = monthly_rent - monthly_expenses - mortgage_payment
-        
-        # If positive cash flow, break even is immediate
+    
+    # If positive cash flow, break even is immediate (based on monthly cash flow)
         if monthly_cash_flow >= 0:
             return 0
-            
-        # Calculate total investment
-        down_payment = self.property.price * 0.20  # Assuming 20% down payment
-        closing_costs = self.property.price * 0.03  # Estimated closing costs
-        total_investment = down_payment + closing_costs
         
-        # Monthly loss, how many months to recoup investment
-        months_to_break_even = total_investment / (monthly_cash_flow * -1)
-        years_to_break_even = months_to_break_even / 12
-        
-        return round(years_to_break_even, 2)
+    # Calculate total investment
+down_payment = self.property.price * 0.20  # Assuming 20% down payment
+closing_costs = self.property.price * 0.03  # Estimated closing costs
+total_investment = down_payment + closing_costs
+    
+    # If still negative cash flow after including appreciation
+    # Calculate how many months to recoup investment through appreciation
+    # Use local appreciation rate or default
+annual_appreciation_rate = self.market.get('appreciation_rate', 0.03)
+monthly_appreciation = (self.property.price * annual_appreciation_rate) / 12
+    
+    # Total monthly benefit (cash flow might be negative, appreciation positive)
+total_monthly_benefit = monthly_cash_flow + monthly_appreciation
+    
+    # If total benefit is negative or zero, investment never breaks even
+if total_monthly_benefit <= 0:
+    return 99  # Return a high number to indicate "never" breaks even
+    
+    # Months to break even
+months_to_break_even = total_investment / total_monthly_benefit
+years_to_break_even = months_to_break_even / 12
+    
+return round(years_to_break_even, 2)
 
     def analyze_property(self, down_payment_percentage=0.20, interest_rate=0.045, term_years=30,
-                        holding_period=5, appreciation_rate=0.03):
+                         holding_period=5, appreciation_rate=0.03):
         """Perform complete financial analysis of a property"""
         # Estimate rental income
         monthly_rent = self.estimate_rental_income()
@@ -185,7 +198,7 @@ class FinancialMetrics:
             holding_period=holding_period,
             appreciation_rate=appreciation_rate
         )
-        
+
         break_even = self.calculate_break_even_point(
             monthly_rent=monthly_rent,
             monthly_expenses=monthly_expenses['total'],

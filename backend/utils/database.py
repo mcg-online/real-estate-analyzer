@@ -13,13 +13,28 @@ def init_db(app):
     if not mongodb_uri:
         raise ValueError("MONGODB_URI configuration is missing")
     
-    _db_client = MongoClient(mongodb_uri)
-    db_name = mongodb_uri.split('/')[-1]
-    _db = _db_client[db_name]
+    max_retries = 3
+    retry_count = 0
     
-    # Ensure unique index on listing_url to prevent duplicates
-    _db['properties'].create_index('listing_url', unique=True)
-    return _db
+    while retry_count < max_retries:
+        try:
+            _db_client = MongoClient(mongodb_uri, serverSelectionTimeoutMS=5000)
+            # Test connection
+            _db_client.admin.command('ping')
+            db_name = mongodb_uri.split('/')[-1]
+            _db = _db_client[db_name]
+            
+            # Ensure unique index on listing_url to prevent duplicates
+            _db['properties'].create_index('listing_url', unique=True)
+            logger.info("Successfully connected to MongoDB")
+            return _db
+        except Exception as e:
+            retry_count += 1
+            if retry_count >= max_retries:
+                logger.error(f"Failed to connect to MongoDB after {max_retries} attempts: {e}")
+                raise
+            logger.warning(f"MongoDB connection attempt {retry_count} failed. Retrying...")
+            time.sleep(2)
 
 def get_db():
     global _db

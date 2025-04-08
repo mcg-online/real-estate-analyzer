@@ -6,6 +6,8 @@ services:
       - "5000:5000"
     volumes:
       - ./backend:/app
+      # Add this line to prevent overwriting Python modules
+      - /app/venv
     environment:
       - DATABASE_URL=mongodb://mongo:27017/realestate
       - API_KEY_ZILLOW=${API_KEY_ZILLOW}
@@ -29,15 +31,4 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
-
-  mongo:
-    image: mongo:4.4
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongo_data:/data/db
-    restart: unless-stopped
-
-volumes:
-  mongo_data:
   
