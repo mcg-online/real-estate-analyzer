@@ -44,3 +44,53 @@ def shutdown_db(exception=None):
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
+
+# Add to backend/app.py
+
+from flask_caching import Cache
+import schedule
+import threading
+import time
+
+# Initialize cache
+cache = Cache(app, config={'CACHE_TYPE': 'SimpleCache'})
+
+# Setup scheduled tasks
+def run_scheduled_tasks():
+    """Run scheduled tasks in background thread"""
+    def run_schedule():
+        while True:
+            schedule.run_pending()
+            time.sleep(60)
+    
+    # Schedule data update tasks
+    schedule.every().day.at("01:00").do(update_property_data)
+    schedule.every().week.do(update_market_data)
+    
+    # Start scheduler in separate thread
+    scheduler_thread = threading.Thread(target=run_schedule)
+    scheduler_thread.daemon = True
+    scheduler_thread.start()
+
+# Cache API responses
+@cache.memoize(timeout=3600)
+def get_cached_properties(filters, limit, skip, sort_by, sort_order):
+    """Get cached property results"""
+    # Implementation
+
+
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+
+# Initialize rate limiter
+limiter = Limiter(
+    app,
+    key_func=get_remote_address,
+    default_limits=["200 per day", "50 per hour"]
+)
+
+# Apply rate limits to API endpoints
+@limiter.limit("10 per minute")
+@app.route('/api/properties')
+def get_properties():
+    # Implementation

@@ -7,6 +7,8 @@ import MarketMetricsChart from './MarketMetricsChart';
 import MapView from './MapView';
 import FilterPanel from './FilterPanel';
 import TopMarketsTable from './TopMarketsTable';
+import { Bar, Line } from 'react-chartjs-2';
+import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend } from 'chart.js';
 
 const Dashboard = () => {
   const [properties, setProperties] = useState([]);
@@ -21,7 +23,31 @@ const Dashboard = () => {
     minBathrooms: '',
     propertyType: '',
     minScore: 70
-  });
+  })
+  const renderMetricsComparison = () => {
+    const data = {
+      labels: topProperties.map(p => p.address.split(',')[0]),
+      datasets: [
+        {
+          label: 'ROI (%)',
+          data: topProperties.map(p => p.metrics?.roi?.annualized_roi || 0),
+          backgroundColor: 'rgba(54, 162, 235, 0.6)',
+        },
+        {
+          label: 'Cash Flow ($)',
+          data: topProperties.map(p => p.metrics?.monthly_cash_flow || 0),
+          backgroundColor: 'rgba(75, 192, 192, 0.6)',
+        }
+      ]
+    };
+    
+    return (
+      <div className="bg-white rounded-lg shadow p-6 mb-8">
+        <h2 className="text-xl font-semibold mb-4">Investment Metrics Comparison</h2>
+        <Bar data={data} height={300} options={{ maintainAspectRatio: false }} />
+      </div>
+    );
+  };
 
   // Fetch data when component mounts or filters change
   useEffect(() => {
