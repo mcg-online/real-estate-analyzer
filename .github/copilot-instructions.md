@@ -1,0 +1,3 @@
+- @azure Rule - Use Azure Best Practices: When generating code for Azure, running terminal commands for Azure, or performing operations related to Azure, invoke your `get_azure_best_practices` tool if available.
+- @aws Rule - Use AWS Best Practices: When generating code for AWS, running terminal commands for AWS, or performing operations related to AWS, invoke your `get_aws_best_practices` tool if available.
+- @gcp Rule - Use GCP Best Practices: When generating code for GCP, running terminal commands for GCP, or performing operations related to GCP, invoke your `get_gcp_best_practices` tool if available.
