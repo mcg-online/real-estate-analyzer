@@ -1,35 +1,17 @@
 {
-	"version": "2.0.0",
-	"tasks": [
-		{
-			"type": "npm",
-			"script": "install",
-			"path": "frontend",
-			"group": {
-				"kind": "build",
-				"isDefault": true
-			},
-			"problemMatcher": [],
-			"label": "npm: install - frontend",
-			"detail": "install dependencies from package"
-		}
-	]
-}
-{
-    "version": "0.2.0",
-    "configurations": [
+    "version": "2.0.0",
+    "tasks": [
         {
-            "type": "debugpy",
-            "request": "launch",
-            "name": "Launch Flask Backend",
-            "program": "${workspaceFolder}/backend/app.py",
-            "envFile": "${workspaceFolder}/.env",
-            "args": [
-                "run",
-                "--no-debugger",
-                "--no-reload"
-            ],
-            "console": "integratedTerminal"
+            "type": "npm",
+            "script": "install",
+            "path": "frontend",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": [],
+            "label": "npm: install - frontend",
+            "detail": "Install dependencies for the frontend"
         }
     ]
 }

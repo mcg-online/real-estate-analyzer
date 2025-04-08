@@ -1,0 +1,30 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "debugpy",
+            "request": "launch",
+            "name": "Launch Flask Backend",
+            "program": "${workspaceFolder}/${input:backendFile}",
+            "envFile": "${workspaceFolder}/.env",
+            "args": [
+                "run",
+                "--no-debugger",
+                "--no-reload"
+            ],
+            "console": "integratedTerminal"
+        }
+    ],
+    "inputs": [
+        {
+            "type": "pickString",
+            "id": "backendFile",
+            "description": "Select the backend file to debug",
+            "options": [
+                "backend/app.py",
+                "backend/services/scheduler.py",
+                "backend/services/analysis/financial_metrics.py"
+            ]
+        }
+    ]
+}
