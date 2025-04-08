@@ -1,14 +1,19 @@
 from flask import Flask, jsonify
 from flask_restful import Api
 from flask_jwt_extended import JWTManager
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from dotenv import load_dotenv
 import os
 import logging
+import schedule
+import threading
+import time
 from routes.properties import PropertyResource, PropertyListResource
 from routes.analysis import AnalysisResource
 from routes.users import UserRegistration, UserLogin, UserLogout
 from utils.database import init_db, close_db
-
+from services.scheduler import update_property_data, update_market_data  # Import both functions
 # Load environment variables
 load_dotenv()
 
@@ -47,8 +52,8 @@ if __name__ == '__main__':
 
 # Add to backend/app.py
 
-from flask_caching import Cache
-import schedule
+from flask_caching import Cache # type: ignore
+import schedule # type: ignore
 import threading
 import time
 
@@ -90,7 +95,43 @@ limiter = Limiter(
 )
 
 # Apply rate limits to API endpoints
+from flask import request, jsonify
+
 @limiter.limit("10 per minute")
 @app.route('/api/properties')
 def get_properties():
-    # Implementation
+    """
+    API endpoint for getting properties with rate limiting applied.
+    This is a wrapper around the PropertyListResource that applies rate limiting.
+    """
+    # Use the same query parameters handling as in PropertyListResource
+    filters = {}
+    price_min = request.args.get('minPrice')
+    price_max = request.args.get('maxPrice')
+    if price_min or price_max:
+        filters['price'] = {}
+        if price_min:
+            filters['price']['$gte'] = int(price_min)
+        if price_max:
+            filters['price']['$lte'] = int(price_max)
+    
+    # Pagination
+    limit = int(request.args.get('limit', 50))
+    page = int(request.args.get('page', 1))
+    skip = (page - 1) * limit
+    
+    # Get properties using the existing model method
+    from models.property import Property
+    properties = Property.find_all(
+        filters=filters,
+        limit=limit,
+        skip=skip
+    )
+    
+    # Convert to JSON
+    properties_json = [p.to_dict() for p in properties]
+    for p in properties_json:
+        if '_id' in p:
+            p['_id'] = str(p['_id'])
+    
+    return jsonify(properties_json)
