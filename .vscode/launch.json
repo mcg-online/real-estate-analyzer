@@ -3,7 +3,7 @@
     "configurations": [
         {
             "name": "Python: Flask",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
             "module": "flask",
             "env": {
@@ -20,7 +20,7 @@
         },
         {
             "name": "Python: Django",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
             "module": "django",
             "args": [
@@ -31,7 +31,7 @@
         },
         {
             "name": "Python: Current File",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
@@ -39,7 +39,7 @@
         },
         {
             "name": "Python: Attach",
-            "type": "python",
+            "type": "debugpy",
             "request": "attach",
             "justMyCode": false
         },
