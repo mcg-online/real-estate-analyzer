@@ -120,37 +120,37 @@ class FinancialMetrics:
             'appreciation_profit': round(appreciation_profit, 2)
         }
         
-    def calculate_break_even_point(self, monthly_rent, monthly_expenses, mortgage_payment):
+def calculate_break_even_point(self, monthly_rent, monthly_expenses, mortgage_payment):
     """Calculate the break-even point in years"""
-        monthly_cash_flow = monthly_rent - monthly_expenses - mortgage_payment
-    
+    monthly_cash_flow = monthly_rent - monthly_expenses - mortgage_payment
+
     # If positive cash flow, break even is immediate (based on monthly cash flow)
-        if monthly_cash_flow >= 0:
-            return 0
-        
+    if monthly_cash_flow >= 0:
+        return 0
+
     # Calculate total investment
-down_payment = self.property.price * 0.20  # Assuming 20% down payment
-closing_costs = self.property.price * 0.03  # Estimated closing costs
-total_investment = down_payment + closing_costs
-    
+    down_payment = self.property.price * 0.20  # Assuming 20% down payment
+    closing_costs = self.property.price * 0.03  # Estimated closing costs
+    total_investment = down_payment + closing_costs
+
     # If still negative cash flow after including appreciation
     # Calculate how many months to recoup investment through appreciation
     # Use local appreciation rate or default
-annual_appreciation_rate = self.market.get('appreciation_rate', 0.03)
-monthly_appreciation = (self.property.price * annual_appreciation_rate) / 12
-    
+    annual_appreciation_rate = self.market.get('appreciation_rate', 0.03)
+    monthly_appreciation = (self.property.price * annual_appreciation_rate) / 12
+
     # Total monthly benefit (cash flow might be negative, appreciation positive)
-total_monthly_benefit = monthly_cash_flow + monthly_appreciation
-    
+    total_monthly_benefit = monthly_cash_flow + monthly_appreciation
+
     # If total benefit is negative or zero, investment never breaks even
-if total_monthly_benefit <= 0:
-    return 99  # Return a high number to indicate "never" breaks even
-    
+    if total_monthly_benefit <= 0:
+        return 99  # Return a high number to indicate "never" breaks even
+
     # Months to break even
-months_to_break_even = total_investment / total_monthly_benefit
-years_to_break_even = months_to_break_even / 12
-    
-return round(years_to_break_even, 2)
+    months_to_break_even = total_investment / total_monthly_benefit
+    years_to_break_even = months_to_break_even / 12
+
+    return round(years_to_break_even, 2)
 
     def analyze_property(self, down_payment_percentage=0.20, interest_rate=0.045, term_years=30,
                          holding_period=5, appreciation_rate=0.03):
