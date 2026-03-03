@@ -1,7 +1,11 @@
+import re
+from functools import wraps
+
 from flask_restful import Resource, reqparse
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt
 from werkzeug.security import generate_password_hash, check_password_hash
 from utils.database import get_db
+from utils.auth import add_token_to_blocklist
 import logging
 
 logger = logging.getLogger(__name__)
@@ -11,13 +15,44 @@ user_parser.add_argument('username', type=str, required=True, help="Username can
 user_parser.add_argument('password', type=str, required=True, help="Password cannot be blank")
 
 
+def _validate_password(password):
+    if len(password) < 8:
+        return "Password must be at least 8 characters"
+    if not re.search(r'[A-Z]', password):
+        return "Password must contain at least one uppercase letter"
+    if not re.search(r'[a-z]', password):
+        return "Password must contain at least one lowercase letter"
+    if not re.search(r'[0-9]', password):
+        return "Password must contain at least one digit"
+    return None
+
+
+def _lazy_limit(limit_string):
+    """Lazy rate-limit decorator that imports limiter at call time to avoid circular imports.
+
+    Respects RATELIMIT_ENABLED=False in app config (used to disable rate
+    limiting during tests).
+    """
+    def decorator(f):
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            from flask import current_app
+            from app import limiter
+            if not current_app.config.get('RATELIMIT_ENABLED', True):
+                return f(*args, **kwargs)
+            return limiter.limit(limit_string)(f)(*args, **kwargs)
+        return wrapper
+    return decorator
+
+
 class UserRegistration(Resource):
+    decorators = [_lazy_limit("3/hour")]
+
     def post(self):
         """Register a new user.
 
-        Parses username and password from the request, checks for duplicate
-        usernames, hashes the password, and persists the user document to the
-        'users' MongoDB collection.
+        Validates password strength, checks for duplicate usernames, hashes
+        the password, and persists the user document to MongoDB.
 
         Returns:
             tuple: A dict with a success message and HTTP 201 on success, or a
@@ -27,6 +62,10 @@ class UserRegistration(Resource):
         data = user_parser.parse_args()
         username = data['username']
         password = data['password']
+
+        error = _validate_password(password)
+        if error:
+            return {'message': error}, 400
 
         try:
             db = get_db()
@@ -47,6 +86,8 @@ class UserRegistration(Resource):
 
 
 class UserLogin(Resource):
+    decorators = [_lazy_limit("5/minute")]
+
     def post(self):
         """Authenticate a user and return a JWT access token.
 
@@ -82,14 +123,16 @@ class UserLogin(Resource):
 class UserLogout(Resource):
     @jwt_required()
     def post(self):
-        """Log out the current user.
+        """Log out the current user by revoking the JWT token.
 
-        Requires a valid JWT. The token claims are retrieved via ``get_jwt()``
-        to support future blocklist integration. Returns a success message.
+        Requires a valid JWT. The token's jti claim is added to the in-memory
+        blocklist so subsequent requests with the same token are rejected.
 
         Returns:
             tuple: A dict with a logout confirmation message and HTTP 200.
         """
         claims = get_jwt()
-        logger.info("User logged out, jti=%s", claims.get('jti'))
+        jti = claims['jti']
+        add_token_to_blocklist(jti)
+        logger.info("User logged out, jti=%s", jti)
         return {'message': 'User logged out successfully'}, 200

@@ -43,7 +43,7 @@ A comprehensive full-stack web application for analyzing residential real estate
 ## Tech Stack
 
 ### Backend
-- **Framework**: Python 3.8+, Flask 2.x, Flask-RESTful
+- **Framework**: Python 3.9+, Flask 2.x, Flask-RESTful
 - **Authentication**: Flask-JWT-Extended with bcrypt password hashing
 - **Database**: MongoDB (PyMongo 4.x) with connection pooling and auto-reconnect
 - **Caching**: Flask-Caching for response optimization
@@ -52,7 +52,8 @@ A comprehensive full-stack web application for analyzing residential real estate
 - **Async Data Collection**: aiohttp with backoff retry strategy
 - **Background Jobs**: APScheduler for scheduled data updates
 - **Server**: Gunicorn WSGI server (4 workers, production-ready)
-- **Testing**: pytest with 366 tests, 100% pass rate
+- **Testing**: pytest with 367 tests, 100% pass rate
+- **Input Validation**: ObjectId format validation on all ID-based endpoints
 
 ### Frontend
 - **Framework**: React 17 with React Router v5
@@ -331,7 +332,7 @@ curl "http://localhost:5000/api/properties?minPrice=100000&maxPrice=500000&minSc
 ### Prerequisites
 
 - **Docker & Docker Compose** (recommended) OR:
-  - Python 3.8+
+  - Python 3.9+
   - Node.js 14+ and npm
   - MongoDB 4.4+ (if not using Docker)
 
@@ -444,7 +445,7 @@ python -c "from services.data_collection.data_collection_service import DataColl
 ```bash
 cd backend
 
-# Run all 366 tests with verbose output
+# Run all 367 tests with verbose output
 pytest tests/ -v
 
 # Run with coverage report
@@ -469,7 +470,7 @@ pytest tests/ -k "roi" -v
 
 ### Test Coverage
 
-The project maintains **100% test pass rate** with 366 tests covering:
+The project maintains **100% test pass rate** with 367 tests covering:
 - Financial calculation accuracy
 - API endpoint behavior
 - Authentication flows

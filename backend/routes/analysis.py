@@ -1,13 +1,29 @@
 from flask import request
 from flask_restful import Resource
+from bson import ObjectId
+from bson.errors import InvalidId
 from models.property import Property
 from models.market import Market
 from services.analysis.financial_metrics import FinancialMetrics
 from services.analysis.tax_benefits import TaxBenefits
 from services.analysis.financing_options import FinancingOptions
+from services.analysis.opportunity_scoring import OpportunityScoring
 from services.geographic.market_aggregator import MarketAggregator
 from utils.database import get_db
-import traceback
+from utils.errors import error_response
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+def _is_valid_objectid(value):
+    """Check if value is a valid 24-character hex ObjectId string."""
+    try:
+        ObjectId(value)
+        return True
+    except (InvalidId, TypeError):
+        return False
+
 
 # Default market data used when no market is found in the database
 DEFAULT_MARKET_DATA = {
@@ -45,9 +61,11 @@ class PropertyAnalysisResource(Resource):
     def get(self, property_id):
         """Get comprehensive analysis for a single property"""
         try:
+            if not _is_valid_objectid(property_id):
+                return error_response('Invalid property ID format', 'VALIDATION_ERROR', 400)
             property_obj = Property.find_by_id(property_id)
             if not property_obj:
-                return {'error': 'Property not found'}, 404
+                return error_response('Property not found', 'NOT_FOUND', 404)
 
             market_data = _get_market_dict(property_obj)
 
@@ -74,15 +92,17 @@ class PropertyAnalysisResource(Resource):
             return result, 200
 
         except Exception as e:
-            traceback.print_exc()
-            return {'error': str(e)}, 500
+            logger.exception("Failed to analyze property %s", property_id)
+            return error_response(str(e), 'INTERNAL_ERROR', 500)
 
     def post(self, property_id):
         """Run custom analysis with user-defined parameters"""
         try:
+            if not _is_valid_objectid(property_id):
+                return error_response('Invalid property ID format', 'VALIDATION_ERROR', 400)
             property_obj = Property.find_by_id(property_id)
             if not property_obj:
-                return {'error': 'Property not found'}, 404
+                return error_response('Property not found', 'NOT_FOUND', 404)
 
             data = request.get_json()
             market_data = _get_market_dict(property_obj)
@@ -126,17 +146,19 @@ class PropertyAnalysisResource(Resource):
             return result, 200
 
         except Exception as e:
-            traceback.print_exc()
-            return {'error': str(e)}, 500
+            logger.exception("Failed custom analysis for property %s", property_id)
+            return error_response(str(e), 'INTERNAL_ERROR', 500)
 
 
 class MarketAnalysisResource(Resource):
     def get(self, market_id):
         """Get market analysis for a specific market area"""
         try:
+            if not _is_valid_objectid(market_id):
+                return error_response('Invalid market ID format', 'VALIDATION_ERROR', 400)
             market = Market.find_by_id(market_id)
             if not market:
-                return {'error': 'Market not found'}, 404
+                return error_response('Market not found', 'NOT_FOUND', 404)
 
             db = get_db()
             aggregator = MarketAggregator(db)
@@ -148,7 +170,7 @@ class MarketAnalysisResource(Resource):
             elif market.market_type == 'zip_code':
                 aggregate_data = aggregator.aggregate_by_zip_code(market.zip_code)
             else:
-                return {'error': 'Invalid market type'}, 400
+                return error_response('Invalid market type', 'INVALID_MARKET_TYPE', 400)
 
             result = {
                 'market_id': str(market._id),
@@ -161,15 +183,17 @@ class MarketAnalysisResource(Resource):
             return result, 200
 
         except Exception as e:
-            traceback.print_exc()
-            return {'error': str(e)}, 500
+            logger.exception("Failed to get market analysis for %s", market_id)
+            return error_response(str(e), 'INTERNAL_ERROR', 500)
 
     def post(self, market_id):
         """Run custom market analysis with user-defined parameters"""
         try:
+            if not _is_valid_objectid(market_id):
+                return error_response('Invalid market ID format', 'VALIDATION_ERROR', 400)
             market = Market.find_by_id(market_id)
             if not market:
-                return {'error': 'Market not found'}, 404
+                return error_response('Market not found', 'NOT_FOUND', 404)
 
             data = request.get_json()
             db = get_db()
@@ -182,7 +206,7 @@ class MarketAnalysisResource(Resource):
             elif market.market_type == 'zip_code':
                 aggregate_data = aggregator.aggregate_by_zip_code(market.zip_code)
             else:
-                return {'error': 'Invalid market type'}, 400
+                return error_response('Invalid market type', 'INVALID_MARKET_TYPE', 400)
 
             result = {
                 'market_id': str(market._id),
@@ -196,8 +220,29 @@ class MarketAnalysisResource(Resource):
             return result, 200
 
         except Exception as e:
-            traceback.print_exc()
-            return {'error': str(e)}, 500
+            logger.exception("Failed custom market analysis for %s", market_id)
+            return error_response(str(e), 'INTERNAL_ERROR', 500)
+
+class OpportunityScoringResource(Resource):
+    def get(self, property_id):
+        """Get investment opportunity score for a property"""
+        try:
+            if not _is_valid_objectid(property_id):
+                return error_response('Invalid property ID format', 'VALIDATION_ERROR', 400)
+            property_obj = Property.find_by_id(property_id)
+            if not property_obj:
+                return error_response('Property not found', 'NOT_FOUND', 404)
+
+            market_data = _get_market_dict(property_obj)
+            scorer = OpportunityScoring(property_obj, market_data)
+            result = scorer.calculate_score()
+            result['property_id'] = str(property_obj._id)
+            return result, 200
+
+        except Exception as e:
+            logger.exception("Failed to score opportunity for property %s", property_id)
+            return error_response(str(e), 'INTERNAL_ERROR', 500)
+
 
 class TopMarketsResource(Resource):
     def get(self):
@@ -210,14 +255,14 @@ class TopMarketsResource(Resource):
             aggregator = MarketAggregator(db)
 
             if metric == 'roi':
-                top_markets = aggregator.top_markets_by_roi(limit=limit)
+                top_markets = aggregator.top_markets_by_roi(limit=limit, sort_field='avg_roi')
             elif metric == 'cap_rate':
-                top_markets = aggregator.top_markets_by_roi(limit=limit)
+                top_markets = aggregator.top_markets_by_roi(limit=limit, sort_field='avg_cap_rate')
             else:
-                return {'error': 'Invalid metric'}, 400
+                return error_response('Invalid metric', 'INVALID_METRIC', 400)
 
             return top_markets, 200
 
         except Exception as e:
-            traceback.print_exc()
-            return {'error': str(e)}, 500
+            logger.exception("Failed to get top markets")
+            return error_response(str(e), 'INTERNAL_ERROR', 500)

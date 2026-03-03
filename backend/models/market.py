@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from utils.database import get_db
 from bson import ObjectId
 import logging
@@ -22,7 +22,7 @@ class Market:
         self.median_income = median_income
         self.unemployment_rate = unemployment_rate
         self.metrics = {}
-        self.created_at = datetime.utcnow()
+        self.created_at = datetime.now(timezone.utc)
         self.updated_at = self.created_at
 
         # Market-specific metrics
@@ -51,7 +51,7 @@ class Market:
             result = db[self.collection_name].insert_one(self.to_dict())
             self._id = result.inserted_id
         else:
-            self.updated_at = datetime.utcnow()
+            self.updated_at = datetime.now(timezone.utc)
             db[self.collection_name].update_one(
                 {'_id': self._id},
                 {'$set': self.to_dict()}
@@ -79,7 +79,7 @@ class Market:
     def find_all(cls, filters=None, limit=100, skip=0):
         db = get_db()
         cursor = db[cls.collection_name].find(filters or {}).limit(limit).skip(skip)
-        return [cls.from_dict(m) for m in cursor]
+        return [m for m in (cls.from_dict(doc) for doc in cursor) if m is not None]
 
     def to_dict(self):
         return {
@@ -114,42 +114,46 @@ class Market:
 
     @classmethod
     def from_dict(cls, data):
-        instance = cls(
-            name=data.get('name', 'Unknown'),
-            market_type=data.get('market_type', 'unknown'),
-            state=data.get('state'),
-            county=data.get('county'),
-            city=data.get('city'),
-            zip_code=data.get('zip_code'),
-            population=data.get('population'),
-            median_income=data.get('median_income'),
-            unemployment_rate=data.get('unemployment_rate')
-        )
+        try:
+            instance = cls(
+                name=data.get('name', 'Unknown'),
+                market_type=data.get('market_type', 'unknown'),
+                state=data.get('state'),
+                county=data.get('county'),
+                city=data.get('city'),
+                zip_code=data.get('zip_code'),
+                population=data.get('population'),
+                median_income=data.get('median_income'),
+                unemployment_rate=data.get('unemployment_rate')
+            )
 
-        # Preserve ObjectId for _id so saves work correctly
-        if '_id' in data:
-            instance._id = data['_id']
+            # Preserve ObjectId for _id so saves work correctly
+            if '_id' in data:
+                instance._id = data['_id']
 
-        instance.metrics = data.get('metrics', {})
-        instance.created_at = data.get('created_at', instance.created_at)
-        instance.updated_at = data.get('updated_at', instance.updated_at)
+            instance.metrics = data.get('metrics', {})
+            instance.created_at = data.get('created_at', instance.created_at)
+            instance.updated_at = data.get('updated_at', instance.updated_at)
 
-        # Set market-specific metrics
-        instance.property_tax_rate = data.get('property_tax_rate')
-        instance.price_to_rent_ratio = data.get('price_to_rent_ratio')
-        instance.vacancy_rate = data.get('vacancy_rate')
-        instance.appreciation_rate = data.get('appreciation_rate')
-        instance.median_home_price = data.get('median_home_price')
-        instance.median_rent = data.get('median_rent')
-        instance.price_per_sqft = data.get('price_per_sqft')
-        instance.days_on_market = data.get('days_on_market')
-        instance.school_rating = data.get('school_rating')
-        instance.crime_rating = data.get('crime_rating')
-        instance.walk_score = data.get('walk_score')
-        instance.transit_score = data.get('transit_score')
-        instance.avg_hoa_fee = data.get('avg_hoa_fee')
+            # Set market-specific metrics
+            instance.property_tax_rate = data.get('property_tax_rate')
+            instance.price_to_rent_ratio = data.get('price_to_rent_ratio')
+            instance.vacancy_rate = data.get('vacancy_rate')
+            instance.appreciation_rate = data.get('appreciation_rate')
+            instance.median_home_price = data.get('median_home_price')
+            instance.median_rent = data.get('median_rent')
+            instance.price_per_sqft = data.get('price_per_sqft')
+            instance.days_on_market = data.get('days_on_market')
+            instance.school_rating = data.get('school_rating')
+            instance.crime_rating = data.get('crime_rating')
+            instance.walk_score = data.get('walk_score')
+            instance.transit_score = data.get('transit_score')
+            instance.avg_hoa_fee = data.get('avg_hoa_fee')
 
-        instance.tax_benefits = data.get('tax_benefits', {})
-        instance.financing_programs = data.get('financing_programs', [])
+            instance.tax_benefits = data.get('tax_benefits', {})
+            instance.financing_programs = data.get('financing_programs', [])
 
-        return instance
+            return instance
+        except Exception as e:
+            logger.error(f"Failed to deserialize market document {data.get('_id')}: {e}")
+            return None

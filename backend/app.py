@@ -13,10 +13,13 @@ import uuid
 from dotenv import load_dotenv
 import os
 
+__version__ = '1.2.0'
+
 from routes.properties import PropertyResource, PropertyListResource
-from routes.analysis import PropertyAnalysisResource, MarketAnalysisResource, TopMarketsResource
+from routes.analysis import PropertyAnalysisResource, MarketAnalysisResource, TopMarketsResource, OpportunityScoringResource
 from routes.users import UserRegistration, UserLogin, UserLogout
 from utils.database import init_db, close_db
+from utils.auth import is_token_revoked
 from services.scheduler import update_property_data, update_market_data
 
 # Load environment variables
@@ -25,6 +28,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB
 
 # JWT configuration - Flask-JWT-Extended uses JWT_SECRET_KEY, not SECRET_KEY
 jwt_secret = os.getenv('JWT_SECRET')
@@ -36,9 +40,17 @@ app.config['SECRET_KEY'] = jwt_secret
 app.config['MONGODB_URI'] = os.getenv('DATABASE_URL')
 
 # Initialize extensions
-CORS(app)
+cors_origins = os.getenv('CORS_ORIGINS', 'http://localhost:3000').split(',')
+CORS(app, origins=cors_origins, supports_credentials=True)
 api = Api(app)
 jwt = JWTManager(app)
+
+
+@jwt.token_in_blocklist_loader
+def check_if_token_revoked(jwt_header, jwt_payload):
+    return is_token_revoked(jwt_payload['jti'])
+
+
 cache = Cache(app, config={'CACHE_TYPE': 'SimpleCache'})
 limiter = Limiter(get_remote_address, app=app, default_limits=["200 per day", "50 per hour"])
 
@@ -51,6 +63,7 @@ api.add_resource(PropertyResource, '/api/properties/<property_id>')
 api.add_resource(PropertyAnalysisResource, '/api/analysis/property/<property_id>')
 api.add_resource(MarketAnalysisResource, '/api/analysis/market/<market_id>')
 api.add_resource(TopMarketsResource, '/api/markets/top')
+api.add_resource(OpportunityScoringResource, '/api/analysis/score/<property_id>')
 api.add_resource(UserRegistration, '/api/auth/register')
 api.add_resource(UserLogin, '/api/auth/login')
 api.add_resource(UserLogout, '/api/auth/logout')
@@ -74,6 +87,12 @@ def after_request(response):
         response.status_code,
         latency,
     )
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    if not app.debug:
+        response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
     return response
 
 
@@ -81,7 +100,7 @@ def after_request(response):
 def home():
     return jsonify({
         'message': 'Real Estate Investment Analysis API',
-        'version': '1.0.0'
+        'version': __version__
     })
 
 
@@ -107,11 +126,29 @@ def readiness_check():
         checks['mongodb'] = {'status': 'error', 'detail': str(e)}
         overall_healthy = False
 
+    # Scheduler check
+    if _scheduler_thread is not None:
+        if _scheduler_thread.is_alive():
+            checks['scheduler'] = {'status': 'ok'}
+            with _scheduler_lock:
+                if _scheduler_last_heartbeat:
+                    elapsed = time.time() - _scheduler_last_heartbeat
+                    if elapsed > 600:  # No heartbeat in 10 minutes
+                        checks['scheduler'] = {
+                            'status': 'warning',
+                            'detail': f'No heartbeat for {int(elapsed)}s'
+                        }
+        else:
+            checks['scheduler'] = {'status': 'error', 'detail': 'Scheduler thread died'}
+            overall_healthy = False
+
+    _ensure_scheduler_running()
+
     status_code = 200 if overall_healthy else 503
     return jsonify({
         'status': 'healthy' if overall_healthy else 'degraded',
         'checks': checks,
-        'version': '1.0.0'
+        'version': __version__
     }), status_code
 
 
@@ -122,16 +159,21 @@ def liveness_check():
 
 
 _scheduler_thread = None
+_scheduler_last_heartbeat = None
+_scheduler_lock = threading.Lock()
 
 
 def run_scheduled_tasks():
-    """Run scheduled tasks in background thread"""
+    """Run scheduled tasks in background thread."""
     global _scheduler_thread
 
     def run_schedule():
+        global _scheduler_last_heartbeat
         while True:
             try:
                 schedule.run_pending()
+                with _scheduler_lock:
+                    _scheduler_last_heartbeat = time.time()
                 time.sleep(60)
             except Exception as e:
                 logger.error(f"Error in scheduler: {e}")
@@ -140,10 +182,18 @@ def run_scheduled_tasks():
     schedule.every().day.at("01:00").do(update_property_data)
     schedule.every().week.do(update_market_data)
 
-    _scheduler_thread = threading.Thread(target=run_schedule)
+    _scheduler_thread = threading.Thread(target=run_schedule, name="scheduler")
     _scheduler_thread.daemon = True
     _scheduler_thread.start()
     return _scheduler_thread
+
+
+def _ensure_scheduler_running():
+    """Restart the scheduler thread if it has died."""
+    global _scheduler_thread
+    if _scheduler_thread is not None and not _scheduler_thread.is_alive():
+        logger.warning("Scheduler thread died, restarting...")
+        run_scheduled_tasks()
 
 
 @app.teardown_appcontext

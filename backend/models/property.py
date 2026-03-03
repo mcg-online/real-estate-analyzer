@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from utils.database import get_db
 import logging
 from bson import ObjectId
@@ -30,7 +30,7 @@ class Property:
         self.longitude = longitude
         self.images = images or []
         self.description = description
-        self.created_at = datetime.utcnow()
+        self.created_at = datetime.now(timezone.utc)
         self.updated_at = self.created_at
         self.metrics = {}
         self.score = None
@@ -42,7 +42,7 @@ class Property:
                 existing = db[self.collection_name].find_one({'listing_url': self.listing_url})
                 if existing:
                     self._id = existing['_id']
-                    self.updated_at = datetime.utcnow()
+                    self.updated_at = datetime.now(timezone.utc)
                     db[self.collection_name].update_one(
                         {'_id': self._id},
                         {'$set': self.to_dict()}
@@ -51,7 +51,7 @@ class Property:
                     result = db[self.collection_name].insert_one(self.to_dict())
                     self._id = result.inserted_id
             else:
-                self.updated_at = datetime.utcnow()
+                self.updated_at = datetime.now(timezone.utc)
                 db[self.collection_name].update_one(
                     {'_id': self._id},
                     {'$set': self.to_dict()}

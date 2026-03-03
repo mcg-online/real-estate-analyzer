@@ -105,8 +105,8 @@ class MarketAggregator:
         result = list(self.db.properties.aggregate(pipeline))
         return result[0] if result else None
         
-    def top_markets_by_roi(self, limit=10):
-        """Find top markets ranked by ROI potential"""
+    def top_markets_by_roi(self, limit=10, sort_field='avg_roi'):
+        """Find top markets ranked by a given investment metric field."""
         pipeline = [
             {'$match': {'metrics.cap_rate': {'$exists': True}}},
             {'$group': {
@@ -118,7 +118,7 @@ class MarketAggregator:
                 'avg_roi': {'$avg': '$metrics.roi.annualized_roi'},
             }},
             {'$match': {'count': {'$gte': 5}}},  # Only include markets with enough data
-            {'$sort': {'avg_roi': -1}},
+            {'$sort': {sort_field: -1}},
             {'$limit': limit},
             {'$project': {
                 'state': '$_id.state',

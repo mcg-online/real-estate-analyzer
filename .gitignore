@@ -14,6 +14,9 @@ venv/
 .venv/
 env/
 *.egg
+.coverage
+.pytest_cache/
+htmlcov/
 
 # Node
 node_modules/
@@ -41,3 +44,4 @@ docker-compose.override.yml
 .claude/
 .loki/
 *.log
+.project-intelligence/

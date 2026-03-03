@@ -82,9 +82,12 @@ Deep readiness check that verifies critical dependencies. This checks MongoDB co
   "checks": {
     "mongodb": {
       "status": "ok"
+    },
+    "scheduler": {
+      "status": "ok"
     }
   },
-  "version": "1.0.0"
+  "version": "1.2.0"
 }
 ```
 
@@ -96,9 +99,13 @@ Deep readiness check that verifies critical dependencies. This checks MongoDB co
     "mongodb": {
       "status": "error",
       "detail": "Unable to connect to MongoDB: connection timeout"
+    },
+    "scheduler": {
+      "status": "warning",
+      "detail": "No heartbeat for 720s"
     }
   },
-  "version": "1.0.0"
+  "version": "1.2.0"
 }
 ```
 
@@ -153,57 +160,40 @@ curl -X GET "http://localhost:5000/api/properties?minPrice=200000&maxPrice=50000
 
 **Response (200 OK):**
 ```json
-[
-  {
-    "_id": "507f1f77bcf86cd799439011",
-    "address": "123 Oak Street",
-    "city": "San Francisco",
-    "state": "CA",
-    "zip_code": "94102",
-    "price": 350000,
-    "bedrooms": 3,
-    "bathrooms": 2,
-    "sqft": 1850,
-    "year_built": 1995,
-    "property_type": "single_family",
-    "lot_size": 5000,
-    "listing_url": "https://example.com/property/123",
-    "source": "zillow",
-    "latitude": 37.7749,
-    "longitude": -122.4194,
-    "description": "Beautiful single family home in desirable neighborhood",
-    "images": [
-      "https://example.com/images/123-1.jpg",
-      "https://example.com/images/123-2.jpg"
-    ],
-    "score": 78.5,
-    "created_at": "2024-01-15T10:30:00Z",
-    "updated_at": "2024-01-20T14:22:00Z"
-  },
-  {
-    "_id": "507f1f77bcf86cd799439012",
-    "address": "456 Maple Avenue",
-    "city": "Oakland",
-    "state": "CA",
-    "zip_code": "94601",
-    "price": 425000,
-    "bedrooms": 4,
-    "bathrooms": 3,
-    "sqft": 2200,
-    "year_built": 2000,
-    "property_type": "single_family",
-    "lot_size": 6500,
-    "listing_url": "https://example.com/property/456",
-    "source": "redfin",
-    "latitude": 37.8044,
-    "longitude": -122.2712,
-    "description": "Modern home with updated kitchen and large backyard",
-    "images": [],
-    "score": 82.3,
-    "created_at": "2024-01-18T09:15:00Z",
-    "updated_at": "2024-01-19T16:45:00Z"
+{
+  "data": [
+    {
+      "_id": "507f1f77bcf86cd799439011",
+      "address": "123 Oak Street",
+      "city": "San Francisco",
+      "state": "CA",
+      "zip_code": "94102",
+      "price": 350000,
+      "bedrooms": 3,
+      "bathrooms": 2,
+      "sqft": 1850,
+      "year_built": 1995,
+      "property_type": "single_family",
+      "score": 78.5,
+      "created_at": "2024-01-15T10:30:00+00:00",
+      "updated_at": "2024-01-20T14:22:00+00:00"
+    }
+  ],
+  "total": 142,
+  "page": 1,
+  "limit": 50,
+  "pages": 3
+}
+```
+
+**Error Response (400 Bad Request):**
+```json
+{
+  "error": {
+    "code": "INVALID_ID",
+    "message": "Invalid property ID format"
   }
-]
+}
 ```
 
 ---
@@ -289,7 +279,10 @@ Create a new property in the system.
 **Error Response (400 Bad Request):**
 ```json
 {
-  "error": "Missing required field: property_type"
+  "error": {
+    "code": "MISSING_FIELD",
+    "message": "Missing required field: property_type"
+  }
 }
 ```
 
@@ -1003,19 +996,36 @@ All API endpoints return appropriate HTTP status codes and error responses. Erro
 
 ### Error Response Format
 
-All errors follow this standard format:
+Structured errors follow this format:
 
 ```json
 {
-  "error": "Descriptive error message"
+  "error": {
+    "code": "ERROR_CODE",
+    "message": "Descriptive error message"
+  }
 }
 ```
 
-Or for validation errors:
+For example, validation errors:
 
 ```json
 {
-  "error": "Missing required field: property_type"
+  "error": {
+    "code": "MISSING_FIELD",
+    "message": "Missing required field: property_type"
+  }
+}
+```
+
+Invalid ObjectId format:
+
+```json
+{
+  "error": {
+    "code": "INVALID_ID",
+    "message": "Invalid property ID format"
+  }
 }
 ```
 
@@ -1141,6 +1151,6 @@ For API issues, questions, or feature requests:
 
 ---
 
-**API Version:** 1.0.0
-**Last Updated:** 2024-01-21
+**API Version:** 1.2.0
+**Last Updated:** 2026-03-03
 **Documentation Status:** Current

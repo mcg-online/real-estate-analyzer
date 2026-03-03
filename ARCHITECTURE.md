@@ -68,11 +68,12 @@ The Flask application initializes and coordinates all backend services.
 ### Routes Layer (routes/)
 
 **properties.py - Property Management**
-- `GET /properties` - List all properties with filtering, pagination, sorting
+- `GET /properties` - List all properties with filtering, pagination, sorting (paginated envelope response)
 - `GET /properties/<id>` - Retrieve single property details
 - `POST /properties` - Create new property listing
 - `PUT /properties/<id>` - Update property information
 - `DELETE /properties/<id>` - Remove property from system
+- ObjectId format validation on all ID-based endpoints (returns 400 on invalid IDs)
 
 **analysis.py - Investment Analysis**
 - Composes multiple analysis services
@@ -174,9 +175,21 @@ Analysis services accept (property_obj, market_dict) pairs and return computed r
 - Background job scheduling
 - Daily property update collection
 - Weekly market data aggregation
-- Runs in separate thread to prevent blocking API requests
+- Runs in separate daemon thread to prevent blocking API requests
+- Watchdog with heartbeat tracking: auto-restarts if thread dies
+- Health status exposed via `/health/ready` endpoint
 
 ### Utils Layer (utils/)
+
+**auth.py - JWT Token Blocklist**
+- In-memory set-based token blocklist for logout support
+- `add_token_to_blocklist(jti)` - Revoke a JWT by its JTI claim
+- `is_token_revoked(jti)` - Check if a token has been revoked
+- Integrated with Flask-JWT-Extended's `token_in_blocklist_loader`
+
+**errors.py - Error Response Helpers**
+- `error_response(message, code, status)` - Structured error JSON responses
+- Returns `{"error": {"code": "...", "message": "..."}}` format
 
 **database.py - Database Connection Management**
 - Thread-safe MongoDB connection pooling
@@ -413,7 +426,7 @@ Analysis services accept (property_obj, market_dict) pairs and return computed r
 
 ### Health Checks
 - `/health` - Overall system health
-- `/health/ready` - Database connectivity
+- `/health/ready` - Database connectivity + scheduler health
 - `/health/live` - API responsiveness
 
 ### Request Logging

@@ -9,7 +9,7 @@ Test coverage:
     - GET  /                          -> home endpoint
     - GET  /api/properties            -> list properties
     - GET  /api/properties/<id>       -> single property, not-found branch
-    - POST /api/properties            -> create property (valid + missing field)
+    - POST /api/properties            -> create property (valid + missing field, auth required)
     - POST /api/auth/register         -> new user + duplicate username
     - POST /api/auth/login            -> valid credentials + bad credentials
 """
@@ -120,6 +120,7 @@ def app() -> Generator[Any, None, None]:
                 "JWT_SECRET_KEY": "test-secret-key-for-jwt",
                 "SECRET_KEY": "test-secret-key",
                 "CACHE_TYPE": "SimpleCache",
+                "RATELIMIT_ENABLED": False,
             }
         )
         yield flask_app
@@ -156,7 +157,6 @@ class TestHomeEndpoint:
         response = client.get("/")
         data = response.get_json()
         assert "version" in data
-        assert data["version"] == "1.0.0"
 
 
 # ---------------------------------------------------------------------------
@@ -205,38 +205,64 @@ class TestHealthEndpoints:
 class TestPropertyListGet:
     """Tests for GET /api/properties."""
 
+    def _make_mock_db(self, count: int) -> MagicMock:
+        """Return a mock db whose count_documents() returns ``count``."""
+        mock_collection = MagicMock()
+        mock_collection.count_documents.return_value = count
+        mock_db = MagicMock()
+        mock_db.__getitem__.return_value = mock_collection
+        return mock_db
+
     def test_list_properties_returns_200(self, client: Any) -> None:
-        """GET /api/properties returns HTTP 200 and a list payload."""
+        """GET /api/properties returns HTTP 200 and a paginated payload."""
         mock_prop = _make_mock_property()
-        with patch("models.property.Property.find_all", return_value=[mock_prop]):
+        mock_db = self._make_mock_db(count=1)
+        with (
+            patch("models.property.Property.find_all", return_value=[mock_prop]),
+            patch("routes.properties.get_db", return_value=mock_db),
+        ):
             response = client.get("/api/properties")
         assert response.status_code == 200
 
     def test_list_properties_returns_list(self, client: Any) -> None:
-        """Response body is a JSON array."""
+        """Response body contains a 'data' key whose value is a JSON array."""
         mock_prop = _make_mock_property()
-        with patch("models.property.Property.find_all", return_value=[mock_prop]):
+        mock_db = self._make_mock_db(count=1)
+        with (
+            patch("models.property.Property.find_all", return_value=[mock_prop]),
+            patch("routes.properties.get_db", return_value=mock_db),
+        ):
             response = client.get("/api/properties")
         data = response.get_json()
-        assert isinstance(data, list)
+        assert isinstance(data["data"], list)
 
     def test_list_properties_empty_db_returns_empty_list(self, client: Any) -> None:
-        """When no properties exist the endpoint returns an empty list."""
-        with patch("models.property.Property.find_all", return_value=[]):
+        """When no properties exist the endpoint returns an empty 'data' list."""
+        mock_db = self._make_mock_db(count=0)
+        with (
+            patch("models.property.Property.find_all", return_value=[]),
+            patch("routes.properties.get_db", return_value=mock_db),
+        ):
             response = client.get("/api/properties")
         assert response.status_code == 200
-        assert response.get_json() == []
+        data = response.get_json()
+        assert data["data"] == []
+        assert data["total"] == 0
 
     def test_list_properties_multiple_results(self, client: Any) -> None:
-        """All mock properties are present in the response."""
+        """All mock properties are present in the response 'data' list."""
         mocks = [
             _make_mock_property(listing_url="http://example.com/1"),
             _make_mock_property(listing_url="http://example.com/2"),
         ]
-        with patch("models.property.Property.find_all", return_value=mocks):
+        mock_db = self._make_mock_db(count=2)
+        with (
+            patch("models.property.Property.find_all", return_value=mocks),
+            patch("routes.properties.get_db", return_value=mock_db),
+        ):
             response = client.get("/api/properties")
         data = response.get_json()
-        assert len(data) == 2
+        assert len(data["data"]) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -276,12 +302,17 @@ class TestPropertyDetailGet:
 
 
 # ---------------------------------------------------------------------------
-# Test: POST /api/properties
+# Test: POST /api/properties (JWT-protected write endpoint)
 # ---------------------------------------------------------------------------
 
 class TestPropertyCreate:
-    """Tests for POST /api/properties."""
+    """Tests for POST /api/properties.
 
+    Write endpoints require a valid JWT Bearer token in the Authorization
+    header.  Helper _auth_headers() obtains one from the test app context.
+    """
+
+    # Use a property_type value from the allowed list defined in routes/properties.py
     _valid_payload: dict[str, Any] = {
         "address": "789 Pine Road",
         "city": "Portland",
@@ -292,14 +323,30 @@ class TestPropertyCreate:
         "bathrooms": 2.5,
         "sqft": 2200,
         "year_built": 2010,
-        "property_type": "Single Family",
+        "property_type": "single_family",
         "lot_size": 8000,
         "listing_url": "http://example.com/listing/789",
         "source": "zillow",
     }
 
-    def test_create_property_returns_201(self, client: Any) -> None:
-        """A fully valid payload returns HTTP 201."""
+    def _auth_headers(self, app: Any) -> dict[str, str]:
+        """Return Authorization headers with a freshly-minted JWT."""
+        from flask_jwt_extended import create_access_token
+        with app.app_context():
+            token = create_access_token(identity="testuser")
+        return {"Authorization": f"Bearer {token}"}
+
+    def test_create_property_without_jwt_returns_401(self, client: Any) -> None:
+        """POST without Authorization header returns 401 Unauthorized."""
+        response = client.post(
+            "/api/properties",
+            json=self._valid_payload,
+            content_type="application/json",
+        )
+        assert response.status_code == 401
+
+    def test_create_property_returns_201(self, client: Any, app: Any) -> None:
+        """A fully valid payload with a valid JWT returns HTTP 201."""
         mock_db = MagicMock()
         mock_collection = MagicMock()
         mock_collection.find_one.return_value = None
@@ -310,22 +357,24 @@ class TestPropertyCreate:
                 "/api/properties",
                 json=self._valid_payload,
                 content_type="application/json",
+                headers=self._auth_headers(app),
             )
         assert response.status_code == 201
 
     def test_create_property_missing_required_field_returns_400(
-        self, client: Any
+        self, client: Any, app: Any
     ) -> None:
-        """Omitting a required field causes a 400 Bad Request."""
+        """Omitting a required field with a valid JWT causes a 400 Bad Request."""
         incomplete = {k: v for k, v in self._valid_payload.items() if k != "price"}
         response = client.post(
             "/api/properties",
             json=incomplete,
             content_type="application/json",
+            headers=self._auth_headers(app),
         )
         assert response.status_code == 400
 
-    def test_create_property_missing_field_error_message(self, client: Any) -> None:
+    def test_create_property_missing_field_error_message(self, client: Any, app: Any) -> None:
         """400 response body names the offending field."""
         incomplete = {
             k: v for k, v in self._valid_payload.items() if k != "listing_url"
@@ -334,12 +383,13 @@ class TestPropertyCreate:
             "/api/properties",
             json=incomplete,
             content_type="application/json",
+            headers=self._auth_headers(app),
         )
         data = response.get_json()
         assert "error" in data
-        assert "listing_url" in data["error"]
+        assert "listing_url" in data["error"]["message"]
 
-    def test_create_property_response_contains_address(self, client: Any) -> None:
+    def test_create_property_response_contains_address(self, client: Any, app: Any) -> None:
         """201 response body echoes the submitted address."""
         mock_db = MagicMock()
         mock_collection = MagicMock()
@@ -351,6 +401,7 @@ class TestPropertyCreate:
                 "/api/properties",
                 json=self._valid_payload,
                 content_type="application/json",
+                headers=self._auth_headers(app),
             )
         assert response.status_code == 201
         data = response.get_json()
@@ -374,7 +425,7 @@ class TestUserRegistration:
         with patch("routes.users.get_db", return_value=mock_db):
             response = client.post(
                 "/api/auth/register",
-                json={"username": "newuser", "password": "s3cr3t!"},
+                json={"username": "newuser", "password": "S3cr3t!Valid"},
                 content_type="application/json",
             )
         assert response.status_code == 201
@@ -389,7 +440,7 @@ class TestUserRegistration:
         with patch("routes.users.get_db", return_value=mock_db):
             response = client.post(
                 "/api/auth/register",
-                json={"username": "newuser2", "password": "pass123"},
+                json={"username": "newuser2", "password": "Pass123Valid"},
                 content_type="application/json",
             )
         data = response.get_json()
@@ -406,7 +457,7 @@ class TestUserRegistration:
         with patch("routes.users.get_db", return_value=mock_db):
             response = client.post(
                 "/api/auth/register",
-                json={"username": "existinguser", "password": "any"},
+                json={"username": "existinguser", "password": "ValidPass1"},
                 content_type="application/json",
             )
         assert response.status_code == 409

@@ -5,6 +5,29 @@ All notable changes to the Real Estate Analyzer project will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-03-03
+
+### Bug Fixes
+- Fixed 5 failing tests in test_routes.py: updated assertions for paginated response format and structured error responses
+- Removed numpy dependency from opportunity_scoring.py: replaced `np.clip()` with pure Python `max(low, min(high, float(value)))`
+- Fixed stale `CURRENT_YEAR` module-level constant in routes/properties.py: now computed inline with `datetime.now().year`
+
+### Security & Validation
+- Added ObjectId format validation in routes/properties.py and routes/analysis.py: returns 400 on malformed IDs instead of 500
+- Added `_is_valid_objectid()` helper using `bson.errors.InvalidId`
+
+### Deprecation Fixes
+- Replaced `datetime.utcnow()` with `datetime.now(timezone.utc)` in models/property.py and models/market.py (deprecated in Python 3.12)
+
+### Resilience Improvements
+- Added scheduler thread watchdog with heartbeat tracking in app.py
+- Added `_ensure_scheduler_running()` auto-restart for dead scheduler threads
+- Readiness endpoint (`/health/ready`) now checks scheduler thread health status
+
+### Testing
+- Fixed 5 failing tests (362 passing → 367 passing)
+- All 367 tests passing
+
 ## [1.1.0] - 2026-03-03
 
 ### Security Fixes

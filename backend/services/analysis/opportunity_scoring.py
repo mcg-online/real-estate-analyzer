@@ -9,8 +9,6 @@ import logging
 from datetime import datetime
 from typing import Any
 
-import numpy as np
-
 from services.analysis.financial_metrics import FinancialMetrics
 
 logger = logging.getLogger(__name__)
@@ -95,7 +93,7 @@ _BENCHMARK_FINANCING_RATE_POOR: float = 0.08        # 8 % interest rate
 
 def _clamp(value: float, low: float = 0.0, high: float = 100.0) -> float:
     """Return *value* clamped to [low, high]."""
-    return float(np.clip(value, low, high))
+    return max(low, min(high, float(value)))
 
 
 def _linear_score(
@@ -197,7 +195,7 @@ class OpportunityScoring:
 
     def _current_year(self) -> int:
         """Return the current calendar year."""
-        return datetime.utcnow().year
+        return datetime.now().year
 
     # ------------------------------------------------------------------
     # Category 1 – Financial metrics (weight: 40 %)

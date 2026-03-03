@@ -13,7 +13,7 @@ Full-stack real estate investment analysis tool with three main components:
 ```bash
 cd backend && source venv/bin/activate && pytest tests/ -v
 ```
-Run the comprehensive test suite (366 tests across 7 files).
+Run the comprehensive test suite (367 tests across 7 files).
 
 ### Backend Validation
 ```bash
@@ -89,7 +89,7 @@ assert result == pytest.approx(expected, abs=2.0)
 ### Test Coverage
 - All tests run without MongoDB (fully mocked with MagicMock)
 - No external dependencies required to run test suite
-- 366 tests total across test_*.py files in backend/tests/
+- 367 tests total across test_*.py files in backend/tests/
 
 ## Database
 
@@ -112,7 +112,7 @@ Performance indexes created automatically on startup:
 Three health endpoints for monitoring:
 - **GET /health**: Basic health check (always 200)
 - **GET /health/live**: Liveness probe (always 200)
-- **GET /health/ready**: Readiness probe (200 only if MongoDB connected)
+- **GET /health/ready**: Readiness probe (200 only if MongoDB connected and scheduler healthy)
 
 ## Known Constraints
 
@@ -132,7 +132,7 @@ real-estate-analyzer/
 │   ├── routes/                 # API endpoints
 │   ├── services/               # Business logic (financial, risk, opportunity)
 │   ├── utils/                  # Database, logging, utilities
-│   └── tests/                  # Comprehensive pytest suite (366 tests)
+│   └── tests/                  # Comprehensive pytest suite (367 tests)
 ├── frontend/
 │   ├── src/
 │   │   ├── App.js             # React Router setup
@@ -148,9 +148,19 @@ real-estate-analyzer/
 └── CLAUDE.md                   # This file
 ```
 
-## Recent Changes (v1.1.0)
+## Recent Changes (v1.2.0)
 
-The project underwent a major overhaul including:
+- Removed numpy dependency (replaced with pure Python clamping)
+- Added ObjectId format validation on all ID-based routes (400 on invalid IDs)
+- Fixed `datetime.utcnow()` deprecation across models (now timezone-aware)
+- Added scheduler thread watchdog with heartbeat and auto-restart
+- Readiness endpoint now checks scheduler health
+- Fixed stale `CURRENT_YEAR` module-level constant
+- Fixed 5 failing tests for paginated response format and structured errors
+- 367 tests all passing
+
+### v1.1.0
+
 - Security hardening (JWT, production server, validation)
 - Critical bug fixes (Market object/dict mismatch, ObjectId stringification, datetime serialization)
 - Resilience improvements (auto-reconnect, health checks, MongoDB indexes)
