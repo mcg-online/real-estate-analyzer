@@ -57,9 +57,9 @@ def update_market_data():
     try:
         logger.info(f"Starting scheduled market data update at {datetime.now()}")
         
-        # Get database connection
-        db = get_db()
-        
+        # Verify database connection is available
+        get_db()
+
         # Get all markets
         markets = Market.find_all()
         

@@ -5,7 +5,7 @@ class MarketAggregator:
     def aggregate_by_state(self, state_code):
         """Aggregate property data at the state level"""
         pipeline = [
-            {'$match': {'state': state_code}},
+            {'$match': {'state': state_code, 'sqft': {'$gt': 0}, 'price': {'$gt': 0}}},
             {'$group': {
                 '_id': '$state',
                 'count': {'$sum': 1},
@@ -39,7 +39,7 @@ class MarketAggregator:
     def aggregate_by_city(self, state_code, city):
         """Aggregate property data at the city level"""
         pipeline = [
-            {'$match': {'state': state_code, 'city': city}},
+            {'$match': {'state': state_code, 'city': city, 'sqft': {'$gt': 0}, 'price': {'$gt': 0}}},
             {'$group': {
                 '_id': {'state': '$state', 'city': '$city'},
                 'count': {'$sum': 1},
@@ -74,7 +74,7 @@ class MarketAggregator:
     def aggregate_by_zip_code(self, zip_code):
         """Aggregate property data at the zip code level"""
         pipeline = [
-            {'$match': {'zip_code': zip_code}},
+            {'$match': {'zip_code': zip_code, 'sqft': {'$gt': 0}, 'price': {'$gt': 0}}},
             {'$group': {
                 '_id': '$zip_code',
                 'count': {'$sum': 1},

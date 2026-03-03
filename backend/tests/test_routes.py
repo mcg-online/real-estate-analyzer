@@ -160,6 +160,45 @@ class TestHomeEndpoint:
 
 
 # ---------------------------------------------------------------------------
+# Test: Health check endpoints
+# ---------------------------------------------------------------------------
+
+class TestHealthEndpoints:
+    """Tests for health check endpoints."""
+
+    def test_health_returns_200(self, client: Any) -> None:
+        response = client.get("/health")
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["status"] == "ok"
+
+    def test_liveness_returns_200(self, client: Any) -> None:
+        response = client.get("/health/live")
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["status"] == "alive"
+        assert "pid" in data
+
+    @patch("utils.database.get_db")
+    def test_readiness_healthy_when_db_connected(self, mock_get_db: Any, client: Any) -> None:
+        mock_db = MagicMock()
+        mock_db.command.return_value = {"ok": 1}
+        mock_get_db.return_value = mock_db
+        response = client.get("/health/ready")
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["status"] == "healthy"
+
+    @patch("utils.database.get_db")
+    def test_readiness_degraded_when_db_down(self, mock_get_db: Any, client: Any) -> None:
+        mock_get_db.side_effect = ConnectionError("Cannot connect")
+        response = client.get("/health/ready")
+        assert response.status_code == 503
+        data = response.get_json()
+        assert data["status"] == "degraded"
+
+
+# ---------------------------------------------------------------------------
 # Test: GET /api/properties
 # ---------------------------------------------------------------------------
 

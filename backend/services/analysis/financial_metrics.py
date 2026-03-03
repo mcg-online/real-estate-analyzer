@@ -6,6 +6,8 @@ class FinancialMetrics:
     def estimate_rental_income(self):
         """Estimate monthly rental income based on property characteristics and market data"""
         price_to_rent_ratio = self.market.get('price_to_rent_ratio', 15)
+        if not price_to_rent_ratio or price_to_rent_ratio <= 0:
+            price_to_rent_ratio = 15
         annual_rent = self.property.price / price_to_rent_ratio
         monthly_rent = annual_rent / 12
         return round(monthly_rent, 2)
@@ -70,6 +72,8 @@ class FinancialMetrics:
 
     def calculate_cap_rate(self, annual_rental_income, annual_expenses):
         """Calculate capitalization rate"""
+        if self.property.price <= 0:
+            return 0.0
         noi = annual_rental_income - annual_expenses
         cap_rate = (noi / self.property.price) * 100
         return round(cap_rate, 2)
@@ -77,6 +81,8 @@ class FinancialMetrics:
     def calculate_cash_on_cash_return(self, annual_cash_flow, down_payment, closing_costs):
         """Calculate cash-on-cash return"""
         total_investment = down_payment + closing_costs
+        if total_investment <= 0:
+            return 0.0
         coc_return = (annual_cash_flow / total_investment) * 100
         return round(coc_return, 2)
 
@@ -185,7 +191,7 @@ class FinancialMetrics:
             'cash_on_cash_return': cash_on_cash,
             'roi': roi,
             'break_even_point': break_even,
-            'price_to_rent_ratio': round(self.property.price / annual_rental_income, 2),
-            'gross_yield': round((annual_rental_income / self.property.price) * 100, 2),
+            'price_to_rent_ratio': round(self.property.price / annual_rental_income, 2) if annual_rental_income > 0 else 0,
+            'gross_yield': round((annual_rental_income / self.property.price) * 100, 2) if self.property.price > 0 else 0,
             'total_investment': round(down_payment + closing_costs, 2)
         }

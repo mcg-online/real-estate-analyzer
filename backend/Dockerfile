@@ -11,6 +11,4 @@ COPY . .
 
 EXPOSE 5000
 
-CMD ["python", "app.py"]
-# This Dockerfile sets up a Python environment, installs dependencies from requirements.txt, and runs a Flask application on port 5000.
-# The app.py file is the entry point for the Flask application. You can modify it as per your project structure.
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "4", "--timeout", "120", "app:app"]

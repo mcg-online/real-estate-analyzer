@@ -1,12 +1,16 @@
 from datetime import datetime
 from utils.database import get_db
 from bson import ObjectId
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class Market:
     collection_name = 'markets'
 
-    def __init__(self, name, market_type, state=None, county=None, 
-                 city=None, zip_code=None, population=None, 
+    def __init__(self, name, market_type, state=None, county=None,
+                 city=None, zip_code=None, population=None,
                  median_income=None, unemployment_rate=None):
         self.name = name
         self.market_type = market_type  # state, county, city, zip_code
@@ -20,7 +24,7 @@ class Market:
         self.metrics = {}
         self.created_at = datetime.utcnow()
         self.updated_at = self.created_at
-        
+
         # Market-specific metrics
         self.property_tax_rate = None
         self.price_to_rent_ratio = None
@@ -35,7 +39,7 @@ class Market:
         self.walk_score = None
         self.transit_score = None
         self.avg_hoa_fee = None
-        
+
         # Tax benefits specific to this location
         self.tax_benefits = {}
         # Financing programs available in this location
@@ -49,7 +53,7 @@ class Market:
         else:
             self.updated_at = datetime.utcnow()
             db[self.collection_name].update_one(
-                {'_id': self._id}, 
+                {'_id': self._id},
                 {'$set': self.to_dict()}
             )
         return self
@@ -89,8 +93,8 @@ class Market:
             'median_income': self.median_income,
             'unemployment_rate': self.unemployment_rate,
             'metrics': self.metrics,
-            'created_at': self.created_at,
-            'updated_at': self.updated_at,
+            'created_at': self.created_at.isoformat() if isinstance(self.created_at, datetime) else self.created_at,
+            'updated_at': self.updated_at.isoformat() if isinstance(self.updated_at, datetime) else self.updated_at,
             'property_tax_rate': self.property_tax_rate,
             'price_to_rent_ratio': self.price_to_rent_ratio,
             'vacancy_rate': self.vacancy_rate,
@@ -110,12 +114,9 @@ class Market:
 
     @classmethod
     def from_dict(cls, data):
-        if '_id' in data:
-            data['_id'] = str(data['_id']) if isinstance(data['_id'], ObjectId) else data['_id']
-            
         instance = cls(
-            name=data['name'],
-            market_type=data['market_type'],
+            name=data.get('name', 'Unknown'),
+            market_type=data.get('market_type', 'unknown'),
             state=data.get('state'),
             county=data.get('county'),
             city=data.get('city'),
@@ -124,14 +125,15 @@ class Market:
             median_income=data.get('median_income'),
             unemployment_rate=data.get('unemployment_rate')
         )
-        
+
+        # Preserve ObjectId for _id so saves work correctly
         if '_id' in data:
             instance._id = data['_id']
-        
+
         instance.metrics = data.get('metrics', {})
         instance.created_at = data.get('created_at', instance.created_at)
         instance.updated_at = data.get('updated_at', instance.updated_at)
-        
+
         # Set market-specific metrics
         instance.property_tax_rate = data.get('property_tax_rate')
         instance.price_to_rent_ratio = data.get('price_to_rent_ratio')
@@ -146,8 +148,8 @@ class Market:
         instance.walk_score = data.get('walk_score')
         instance.transit_score = data.get('transit_score')
         instance.avg_hoa_fee = data.get('avg_hoa_fee')
-        
+
         instance.tax_benefits = data.get('tax_benefits', {})
         instance.financing_programs = data.get('financing_programs', [])
-        
+
         return instance

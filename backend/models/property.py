@@ -71,12 +71,6 @@ class Property:
             return cls.from_dict(property_data)
         return None
 
-    @classmethod
-    def find_all(cls, filters=None, limit=100, skip=0, sort_by='price', sort_order=1):
-        db = get_db()
-        cursor = db[cls.collection_name].find(filters or {}).sort(sort_by, sort_order).limit(limit).skip(skip)
-        return [cls.from_dict(p) for p in cursor]
-
     def to_dict(self):
         return {
             'address': self.address,
@@ -104,28 +98,38 @@ class Property:
 
     @classmethod
     def from_dict(cls, data):
-        instance = cls(
-            address=data['address'],
-            price=data['price'],
-            bedrooms=data['bedrooms'],
-            bathrooms=data['bathrooms'],
-            sqft=data['sqft'],
-            year_built=data['year_built'],
-            property_type=data['property_type'],
-            lot_size=data['lot_size'],
-            listing_url=data['listing_url'],
-            source=data['source'],
-            latitude=data.get('latitude'),
-            longitude=data.get('longitude'),
-            images=data.get('images', []),
-            description=data.get('description'),
-            city=data.get('city', ''),
-            state=data.get('state', ''),
-            zip_code=data.get('zip_code', '')
-        )
-        instance._id = data.get('_id')
-        instance.created_at = data.get('created_at', instance.created_at)
-        instance.updated_at = data.get('updated_at', instance.updated_at)
-        instance.metrics = data.get('metrics', {})
-        instance.score = data.get('score')
-        return instance
+        try:
+            instance = cls(
+                address=data.get('address', 'Unknown'),
+                price=data.get('price', 0),
+                bedrooms=data.get('bedrooms', 0),
+                bathrooms=data.get('bathrooms', 0),
+                sqft=data.get('sqft', 0),
+                year_built=data.get('year_built', 0),
+                property_type=data.get('property_type', 'Unknown'),
+                lot_size=data.get('lot_size', 0),
+                listing_url=data.get('listing_url', ''),
+                source=data.get('source', 'Unknown'),
+                latitude=data.get('latitude'),
+                longitude=data.get('longitude'),
+                images=data.get('images', []),
+                description=data.get('description'),
+                city=data.get('city', ''),
+                state=data.get('state', ''),
+                zip_code=data.get('zip_code', '')
+            )
+            instance._id = data.get('_id')
+            instance.created_at = data.get('created_at', instance.created_at)
+            instance.updated_at = data.get('updated_at', instance.updated_at)
+            instance.metrics = data.get('metrics', {})
+            instance.score = data.get('score')
+            return instance
+        except Exception as e:
+            logger.error(f"Failed to deserialize property document {data.get('_id')}: {e}")
+            return None
+
+    @classmethod
+    def find_all(cls, filters=None, limit=100, skip=0, sort_by='price', sort_order=1):
+        db = get_db()
+        cursor = db[cls.collection_name].find(filters or {}).sort(sort_by, sort_order).skip(skip).limit(limit)
+        return [p for p in (cls.from_dict(doc) for doc in cursor) if p is not None]

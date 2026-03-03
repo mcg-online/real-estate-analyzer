@@ -7,6 +7,11 @@ services:
     volumes:
       - mongo_data:/data/db
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   backend:
     build: ./backend
@@ -17,14 +22,17 @@ services:
       - /app/venv
     environment:
       - DATABASE_URL=mongodb://mongo:27017/realestate
-      - API_KEY_ZILLOW=${API_KEY_ZILLOW}
-      - API_KEY_REALTOR=${API_KEY_REALTOR}
-      - MLS_USERNAME=${MLS_USERNAME}
-      - MLS_PASSWORD=${MLS_PASSWORD}
       - JWT_SECRET=${JWT_SECRET}
     depends_on:
-      - mongo
+      mongo:
+        condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
 
   frontend:
     build: ./frontend
