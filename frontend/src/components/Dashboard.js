@@ -7,8 +7,10 @@ import MarketMetricsChart from './MarketMetricsChart';
 import MapView from './MapView';
 import FilterPanel from './FilterPanel';
 import TopMarketsTable from './TopMarketsTable';
-import { Bar, Line } from 'react-chartjs-2';
+import { Bar } from 'react-chartjs-2';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend } from 'chart.js';
+
+ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
 const Dashboard = () => {
   const [properties, setProperties] = useState([]);
@@ -23,7 +25,8 @@ const Dashboard = () => {
     minBathrooms: '',
     propertyType: '',
     minScore: 70
-  })
+  });
+
   const renderMetricsComparison = () => {
     const data = {
       labels: topProperties.map(p => p.address.split(',')[0]),
@@ -40,7 +43,7 @@ const Dashboard = () => {
         }
       ]
     };
-    
+
     return (
       <div className="bg-white rounded-lg shadow p-6 mb-8">
         <h2 className="text-xl font-semibold mb-4">Investment Metrics Comparison</h2>
@@ -49,26 +52,21 @@ const Dashboard = () => {
     );
   };
 
-  // Fetch data when component mounts or filters change
   useEffect(() => {
     const fetchData = async () => {
       setIsLoading(true);
       try {
-        // Build query params for filtering
         const queryParams = Object.entries(filters)
           .filter(([_, value]) => value !== '')
           .map(([key, value]) => `${key}=${value}`)
           .join('&');
 
-        // Fetch properties
         const propertiesResponse = await axios.get(`/api/properties?${queryParams}`);
         setProperties(propertiesResponse.data);
 
-        // Set top properties (highest score)
-        const sorted = [...propertiesResponse.data].sort((a, b) => b.score - a.score);
+        const sorted = [...propertiesResponse.data].sort((a, b) => (b.score || 0) - (a.score || 0));
         setTopProperties(sorted.slice(0, 4));
 
-        // Fetch top markets
         const marketsResponse = await axios.get('/api/markets/top?metric=roi&limit=5');
         setTopMarkets(marketsResponse.data);
 
@@ -88,120 +86,121 @@ const Dashboard = () => {
   };
 
   if (isLoading) {
-    return 
-      
-    ;
+    return (
+      <div className="flex items-center justify-center py-20">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading dashboard...</p>
+        </div>
+      </div>
+    );
   }
 
   if (error) {
-    return {error};
+    return (
+      <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
+        <p className="text-red-600">{error}</p>
+      </div>
+    );
   }
 
   return (
-    
-      
-        Investment Dashboard
-        
+    <div>
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold text-gray-900">Investment Dashboard</h1>
+        <p className="mt-2 text-gray-600">
           Welcome to your real estate investment dashboard. Here you can see top investment
           opportunities and analyze potential properties.
-        
-      
+        </p>
+      </div>
 
       {/* Summary Statistics */}
-      
-        
-          Properties
-          {properties.length}
-        
-        
-          Avg. Price
-          
-            ${properties.length > 0 
-              ? Math.round(properties.reduce((sum, p) => sum + p.price, 0) / properties.length).toLocaleString() 
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <div className="bg-white rounded-lg shadow p-6">
+          <p className="text-sm text-gray-500">Properties</p>
+          <p className="text-2xl font-bold text-gray-900">{properties.length}</p>
+        </div>
+        <div className="bg-white rounded-lg shadow p-6">
+          <p className="text-sm text-gray-500">Avg. Price</p>
+          <p className="text-2xl font-bold text-gray-900">
+            ${properties.length > 0
+              ? Math.round(properties.reduce((sum, p) => sum + p.price, 0) / properties.length).toLocaleString()
               : 0}
-          
-        
-        
-          Avg. ROI
-          
+          </p>
+        </div>
+        <div className="bg-white rounded-lg shadow p-6">
+          <p className="text-sm text-gray-500">Avg. ROI</p>
+          <p className="text-2xl font-bold text-gray-900">
             {properties.length > 0 && properties[0].metrics && properties[0].metrics.roi
               ? (properties.reduce((sum, p) => sum + (p.metrics.roi?.annualized_roi || 0), 0) / properties.length).toFixed(2)
               : 0}%
-          
-        
-        
-          Avg. Cap Rate
-          
+          </p>
+        </div>
+        <div className="bg-white rounded-lg shadow p-6">
+          <p className="text-sm text-gray-500">Avg. Cap Rate</p>
+          <p className="text-2xl font-bold text-gray-900">
             {properties.length > 0 && properties[0].metrics
               ? (properties.reduce((sum, p) => sum + (p.metrics.cap_rate || 0), 0) / properties.length).toFixed(2)
               : 0}%
-          
-        
-      
+          </p>
+        </div>
+      </div>
 
-      
-        
-          
-            Top Investment Opportunities
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
+        <div className="lg:col-span-2">
+          <div className="bg-white rounded-lg shadow p-6">
+            <h2 className="text-xl font-semibold mb-4">Top Investment Opportunities</h2>
             {topProperties.length > 0 ? (
-              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {topProperties.map(property => (
-                  
+                  <PropertyCard key={property._id} property={property} />
                 ))}
-              
+              </div>
             ) : (
-              No properties match your current filters.
+              <p className="text-gray-500">No properties match your current filters.</p>
             )}
-            
-              
-                View all properties →
-              
-            
-          
-        
-        
-          
-            Filter Properties
-            
-          
-        
-      
+            <div className="mt-4 text-center">
+              <Link to="/" className="text-blue-600 hover:text-blue-800 font-medium">
+                View all properties &rarr;
+              </Link>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div className="bg-white rounded-lg shadow p-6">
+            <h2 className="text-xl font-semibold mb-4">Filter Properties</h2>
+            <FilterPanel filters={filters} onFilterChange={handleFilterChange} />
+          </div>
+        </div>
+      </div>
 
-      
-        
-          
-            Property Map
-            
-          
-        
-        
-          
-            Investment Summary
-            
-          
-        
-      
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+        <div className="bg-white rounded-lg shadow p-6">
+          <h2 className="text-xl font-semibold mb-4">Property Map</h2>
+          <MapView properties={properties} clickable={true} />
+        </div>
+        <div className="bg-white rounded-lg shadow p-6">
+          <h2 className="text-xl font-semibold mb-4">Investment Summary</h2>
+          <InvestmentSummary properties={properties} />
+        </div>
+      </div>
 
-      
-        
-          
-            Top Markets by ROI
-            
-            
-              
-                View all markets →
-              
-            
-          
-        
-        
-          
-            Investment Metrics
-            
-          
-        
-      
-    
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+        <div className="bg-white rounded-lg shadow p-6">
+          <h2 className="text-xl font-semibold mb-4">Top Markets by ROI</h2>
+          <TopMarketsTable markets={topMarkets} />
+          <div className="mt-4 text-center">
+            <Link to="/" className="text-blue-600 hover:text-blue-800 font-medium">
+              View all markets &rarr;
+            </Link>
+          </div>
+        </div>
+        <div className="bg-white rounded-lg shadow p-6">
+          <h2 className="text-xl font-semibold mb-4">Investment Metrics</h2>
+          <MarketMetricsChart properties={properties} />
+        </div>
+      </div>
+    </div>
   );
 };
 

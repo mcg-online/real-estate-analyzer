@@ -1,7 +1,6 @@
 import logging
 from datetime import datetime
 from services.data_collection.zillow_scraper import ZillowScraper
-from models.property import Property
 from models.market import Market
 from utils.database import get_db
 

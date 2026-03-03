@@ -1,17 +1,22 @@
 from datetime import datetime
 from utils.database import get_db
 import logging
-from bson import ObjectId   # Import ObjectId for MongoDB document IDs
+from bson import ObjectId
 
 logger = logging.getLogger(__name__)
+
 
 class Property:
     collection_name = 'properties'
 
     def __init__(self, address, price, bedrooms, bathrooms, sqft, year_built,
                  property_type, lot_size, listing_url, source, latitude=None,
-                 longitude=None, images=None, description=None):
+                 longitude=None, images=None, description=None, city='',
+                 state='', zip_code=''):
         self.address = address
+        self.city = city
+        self.state = state
+        self.zip_code = zip_code
         self.price = price
         self.bedrooms = bedrooms
         self.bathrooms = bathrooms
@@ -34,7 +39,6 @@ class Property:
         db = get_db()
         try:
             if not hasattr(self, '_id'):
-                # Check for existing property by listing_url
                 existing = db[self.collection_name].find_one({'listing_url': self.listing_url})
                 if existing:
                     self._id = existing['_id']
@@ -61,21 +65,24 @@ class Property:
     def find_by_id(cls, property_id):
         db = get_db()
         if isinstance(property_id, str):
-            property_id = ObjectId(property_id)  # Convert string ID to ObjectId if necessary
+            property_id = ObjectId(property_id)
         property_data = db[cls.collection_name].find_one({'_id': property_id})
         if property_data:
             return cls.from_dict(property_data)
-        return None  
+        return None
 
     @classmethod
-    def find_all(cls, filters=None, limit=100, skip=0):
+    def find_all(cls, filters=None, limit=100, skip=0, sort_by='price', sort_order=1):
         db = get_db()
-        cursor = db[cls.collection_name].find(filters or {}).limit(limit).skip(skip)
+        cursor = db[cls.collection_name].find(filters or {}).sort(sort_by, sort_order).limit(limit).skip(skip)
         return [cls.from_dict(p) for p in cursor]
 
     def to_dict(self):
         return {
             'address': self.address,
+            'city': self.city,
+            'state': self.state,
+            'zip_code': self.zip_code,
             'price': self.price,
             'bedrooms': self.bedrooms,
             'bathrooms': self.bathrooms,
@@ -89,8 +96,8 @@ class Property:
             'longitude': self.longitude,
             'images': self.images,
             'description': self.description,
-            'created_at': self.created_at,
-            'updated_at': self.updated_at,
+            'created_at': self.created_at.isoformat() if isinstance(self.created_at, datetime) else self.created_at,
+            'updated_at': self.updated_at.isoformat() if isinstance(self.updated_at, datetime) else self.updated_at,
             'metrics': self.metrics,
             'score': self.score
         }
@@ -111,7 +118,10 @@ class Property:
             latitude=data.get('latitude'),
             longitude=data.get('longitude'),
             images=data.get('images', []),
-            description=data.get('description')
+            description=data.get('description'),
+            city=data.get('city', ''),
+            state=data.get('state', ''),
+            zip_code=data.get('zip_code', '')
         )
         instance._id = data.get('_id')
         instance.created_at = data.get('created_at', instance.created_at)

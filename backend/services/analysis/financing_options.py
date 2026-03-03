@@ -121,6 +121,7 @@ class FinancingOptions:
             'funding_fee_percentage': funding_fee_percentage * 100,
             'financed_amount': round(financed_amount, 2),
             'monthly_payment': round(monthly_payment, 2),
+            'total_monthly_payment': round(monthly_payment, 2),
             'total_cost': round(total_cost, 2),
             'total_interest': round(total_interest, 2)
         }

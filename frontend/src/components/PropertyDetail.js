@@ -17,7 +17,6 @@ const PropertyDetail = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Custom analysis parameters
   const [customParams, setCustomParams] = useState({
     down_payment_percentage: 0.20,
     interest_rate: 0.045,
@@ -34,17 +33,18 @@ const PropertyDetail = () => {
     const fetchPropertyData = async () => {
       setIsLoading(true);
       try {
-        // Fetch property details
         const propertyRes = await axios.get(`/api/properties/${id}`);
         setProperty(propertyRes.data);
 
-        // Fetch property analysis
         const analysisRes = await axios.get(`/api/analysis/property/${id}`);
         setAnalysis(analysisRes.data);
 
-        // Fetch similar properties
-        const similarRes = await axios.get(`/api/properties/similar/${id}`);
-        setSimilarProperties(similarRes.data);
+        try {
+          const similarRes = await axios.get(`/api/properties?limit=4`);
+          setSimilarProperties(similarRes.data.filter(p => p._id !== id).slice(0, 3));
+        } catch (e) {
+          setSimilarProperties([]);
+        }
 
         setIsLoading(false);
       } catch (err) {
@@ -57,15 +57,10 @@ const PropertyDetail = () => {
     fetchPropertyData();
   }, [id]);
 
-  // Handle custom analysis parameter changes
   const handleParamChange = (name, value) => {
-    setCustomParams({
-      ...customParams,
-      [name]: value
-    });
+    setCustomParams({ ...customParams, [name]: value });
   };
 
-  // Run custom analysis with current parameters
   const runCustomAnalysis = async () => {
     try {
       setIsLoading(true);
@@ -79,9 +74,8 @@ const PropertyDetail = () => {
     }
   };
 
-  // Example fix for loading state in PropertyDetail.js
   if (isLoading) {
-   return <div className="text-center py-10">Loading property details...</div>;
+    return <div className="text-center py-10 text-gray-600">Loading property details...</div>;
   }
 
   if (error) {
@@ -89,272 +83,245 @@ const PropertyDetail = () => {
   }
 
   if (!property || !analysis) {
-    return <div className="text-center py-10">Property not found.</div>;
+    return <div className="text-center py-10 text-gray-600">Property not found.</div>;
   }
-    
-      
-        
-          ← Back to properties
-        
-      
+
+  return (
+    <div>
+      <div className="mb-4">
+        <Link to="/" className="text-blue-600 hover:text-blue-800">
+          &larr; Back to properties
+        </Link>
+      </div>
 
       {/* Property Header */}
-      
-        
-          
-            
-              {property.address}
-              {property.city}, {property.state} {property.zip_code}
-            
-            
-              
-                ${property.price.toLocaleString()}
-              
-              
-                
-                  {property.score}
-                
-                Investment Score
-              
-            
-          
+      <div className="bg-white rounded-lg shadow p-6 mb-6">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">{property.address}</h1>
+            <p className="text-gray-600">{property.city}, {property.state} {property.zip_code}</p>
+          </div>
+          <div className="flex items-center space-x-4 mt-2 md:mt-0">
+            <span className="text-3xl font-bold text-green-600">
+              ${property.price.toLocaleString()}
+            </span>
+            <div className="text-center">
+              <span
+                className="inline-block w-12 h-12 rounded-full text-white font-bold text-lg flex items-center justify-center"
+                style={{ backgroundColor: getScoreColor(property.score) }}
+              >
+                {property.score || '?'}
+              </span>
+              <span className="text-xs text-gray-500">Investment Score</span>
+            </div>
+          </div>
+        </div>
 
-          
-            
-              
-              {property.bedrooms} Bedrooms
-            
-            
-              
-              {property.bathrooms} Bathrooms
-            
-            
-              
-              {property.sqft.toLocaleString()} sq ft
-            
-            
-              
-              Built in {property.year_built}
-            
-          
-        
+        <div className="flex flex-wrap gap-4 text-gray-600">
+          <span>{property.bedrooms} Bedrooms</span>
+          <span>{property.bathrooms} Bathrooms</span>
+          <span>{property.sqft?.toLocaleString()} sq ft</span>
+          <span>Built in {property.year_built}</span>
+        </div>
 
-        
-      
+        <PropertyGallery images={property.images} />
+      </div>
 
       {/* Tabs Navigation */}
-      
-        
-          
-            <button
-              className={`px-6 py-4 text-sm font-medium ${activeTab === 'overview' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
-              onClick={() => setActiveTab('overview')}
-            >
-              Overview
-            
-            <button
-              className={`px-6 py-4 text-sm font-medium ${activeTab === 'financial' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
-              onClick={() => setActiveTab('financial')}
-            >
-              Financial Analysis
-            
-            <button
-              className={`px-6 py-4 text-sm font-medium ${activeTab === 'financing' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
-              onClick={() => setActiveTab('financing')}
-            >
-              Financing Options
-            
-            <button
-              className={`px-6 py-4 text-sm font-medium ${activeTab === 'tax' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
-              onClick={() => setActiveTab('tax')}
-            >
-              Tax Benefits
-            
-            <button
-              className={`px-6 py-4 text-sm font-medium ${activeTab === 'location' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
-              onClick={() => setActiveTab('location')}
-            >
-              Location
-            
-          
-        
+      <div className="bg-white rounded-lg shadow mb-6">
+        <div className="border-b">
+          <nav className="flex overflow-x-auto">
+            {['overview', 'financial', 'financing', 'tax', 'location'].map(tab => (
+              <button
+                key={tab}
+                className={`px-6 py-4 text-sm font-medium whitespace-nowrap ${
+                  activeTab === tab
+                    ? 'text-blue-600 border-b-2 border-blue-600'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+                onClick={() => setActiveTab(tab)}
+              >
+                {tab === 'overview' ? 'Overview' :
+                 tab === 'financial' ? 'Financial Analysis' :
+                 tab === 'financing' ? 'Financing Options' :
+                 tab === 'tax' ? 'Tax Benefits' : 'Location'}
+              </button>
+            ))}
+          </nav>
+        </div>
 
         {/* Tab Content */}
-        
+        <div className="p-6">
           {activeTab === 'overview' && (
-            
-              Property Overview
-              
-                
-                  Description
-                  
+            <div>
+              <h2 className="text-xl font-semibold mb-4">Property Overview</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <h3 className="font-semibold text-gray-700 mb-2">Description</h3>
+                  <p className="text-gray-600 mb-4">
                     {property.description || 'No description available.'}
-                  
-                  
-                  Key Investment Metrics
-                  
-                    Monthly Cash Flow
-                    
-                      ${analysis.financial_analysis.monthly_cash_flow.toLocaleString()}
-                    
-                    Cap Rate
-                    
-                      {analysis.financial_analysis.cap_rate}%
-                    
-                    Cash-on-Cash Return
-                    
-                      {analysis.financial_analysis.cash_on_cash_return}%
-                    
-                    ROI (5yr)
-                    
-                      {analysis.financial_analysis.roi.annualized_roi}%
-                    
-                    Break-even Point
-                    
-                      {analysis.financial_analysis.break_even_point} years
-                    
-                  
-                
-                
-                
-                  Property Details
-                  
-                    Property Type
-                    {formatPropertyType(property.property_type)}
-                    Lot Size
-                    {property.lot_size || 'N/A'}
-                    Price per Sq Ft
-                    
-                      ${Math.round(property.price / property.sqft).toLocaleString()}
-                    
-                    Days on Market
-                    {property.days_on_market || 'N/A'}
-                    Last Updated
-                    
-                      {new Date(property.updated_at).toLocaleDateString()}
-                    
-                    Source
-                    {property.source}
-                    Listing URL
-                    
-                      
-                        View original listing
-                      
-                    
-                  
-                
-              
-            
+                  </p>
+                  <h3 className="font-semibold text-gray-700 mb-2">Key Investment Metrics</h3>
+                  <dl className="space-y-2">
+                    <div className="flex justify-between">
+                      <dt className="text-gray-500">Monthly Cash Flow</dt>
+                      <dd className="font-medium">${analysis.financial_analysis.monthly_cash_flow.toLocaleString()}</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-gray-500">Cap Rate</dt>
+                      <dd className="font-medium">{analysis.financial_analysis.cap_rate}%</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-gray-500">Cash-on-Cash Return</dt>
+                      <dd className="font-medium">{analysis.financial_analysis.cash_on_cash_return}%</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-gray-500">ROI (5yr)</dt>
+                      <dd className="font-medium">{analysis.financial_analysis.roi.annualized_roi}%</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-gray-500">Break-even Point</dt>
+                      <dd className="font-medium">{analysis.financial_analysis.break_even_point} years</dd>
+                    </div>
+                  </dl>
+                </div>
+                <div>
+                  <h3 className="font-semibold text-gray-700 mb-2">Property Details</h3>
+                  <dl className="space-y-2">
+                    <div className="flex justify-between">
+                      <dt className="text-gray-500">Property Type</dt>
+                      <dd className="font-medium">{formatPropertyType(property.property_type)}</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-gray-500">Lot Size</dt>
+                      <dd className="font-medium">{property.lot_size || 'N/A'}</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-gray-500">Price per Sq Ft</dt>
+                      <dd className="font-medium">${Math.round(property.price / property.sqft).toLocaleString()}</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-gray-500">Source</dt>
+                      <dd className="font-medium">{property.source}</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-gray-500">Listing URL</dt>
+                      <dd>
+                        <a href={property.listing_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800">
+                          View original listing
+                        </a>
+                      </dd>
+                    </div>
+                  </dl>
+                </div>
+              </div>
+            </div>
           )}
 
           {activeTab === 'financial' && (
-            
-              Financial Analysis
-              
-            
+            <div>
+              <h2 className="text-xl font-semibold mb-4">Financial Analysis</h2>
+              <InvestmentMetrics analysis={analysis.financial_analysis} />
+            </div>
           )}
 
           {activeTab === 'financing' && (
-            
-              Financing Options
-              
-            
+            <div>
+              <h2 className="text-xl font-semibold mb-4">Financing Options</h2>
+              <FinancingCalculator
+                property={property}
+                financingOptions={analysis.financing_options}
+                onParamChange={handleParamChange}
+                params={customParams}
+                onAnalyze={runCustomAnalysis}
+              />
+            </div>
           )}
 
           {activeTab === 'tax' && (
-            
-              Tax Benefits
-              
-            
+            <div>
+              <h2 className="text-xl font-semibold mb-4">Tax Benefits</h2>
+              <TaxBenefits taxBenefits={analysis.tax_benefits} />
+            </div>
           )}
 
           {activeTab === 'location' && (
-            
-              Location Analysis
-              
-                
-                  
-                  
-                  Market Data
-                  
-                    Property Tax Rate
-                    
-                      {(analysis.market_data.property_tax_rate * 100).toFixed(2)}%
-                    
-                    Vacancy Rate
-                    
-                      {(analysis.market_data.vacancy_rate * 100).toFixed(2)}%
-                    
-                    Price-to-Rent Ratio
-                    
-                      {analysis.market_data.price_to_rent_ratio}
-                    
-                    Appreciation Rate
-                    
-                      {(analysis.market_data.appreciation_rate * 100).toFixed(2)}%
-                    
-                  
-                
-                
-                
-                  Neighborhood Stats
-                  
-                    Schools Rating
-                    
-                      {analysis.market_data.school_rating || 'N/A'}/10
-                    
-                    Crime Rating
-                    
-                      {analysis.market_data.crime_rating || 'N/A'}/10
-                    
-                    Walk Score
-                    
-                      {analysis.market_data.walk_score || 'N/A'}/100
-                    
-                    Transit Score
-                    
-                      {analysis.market_data.transit_score || 'N/A'}/100
-                    
-                  
-                  
-                  Local Incentives
-                  {analysis.tax_benefits.local_tax_incentives.special_programs.length > 0 ? (
-                    
-                      {analysis.tax_benefits.local_tax_incentives.special_programs.map((program, index) => (
-                        {program}
-                      ))}
-                    
-                  ) : (
-                    No special tax or financing programs were found for this location.
-                  )}
-                
-              
-            
+            <div>
+              <h2 className="text-xl font-semibold mb-4">Location Analysis</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <MapView
+                    properties={[property]}
+                    center={property.latitude && property.longitude ? [property.latitude, property.longitude] : undefined}
+                    zoom={14}
+                  />
+                  <h3 className="font-semibold text-gray-700 mt-4 mb-2">Market Data</h3>
+                  <dl className="space-y-2">
+                    <div className="flex justify-between">
+                      <dt className="text-gray-500">Property Tax Rate</dt>
+                      <dd className="font-medium">{(analysis.market_data.property_tax_rate * 100).toFixed(2)}%</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-gray-500">Vacancy Rate</dt>
+                      <dd className="font-medium">{(analysis.market_data.vacancy_rate * 100).toFixed(2)}%</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-gray-500">Price-to-Rent Ratio</dt>
+                      <dd className="font-medium">{analysis.market_data.price_to_rent_ratio}</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-gray-500">Appreciation Rate</dt>
+                      <dd className="font-medium">{(analysis.market_data.appreciation_rate * 100).toFixed(2)}%</dd>
+                    </div>
+                  </dl>
+                </div>
+                <div>
+                  <h3 className="font-semibold text-gray-700 mb-2">Neighborhood Stats</h3>
+                  <dl className="space-y-2">
+                    <div className="flex justify-between">
+                      <dt className="text-gray-500">Schools Rating</dt>
+                      <dd className="font-medium">{analysis.market_data.school_rating || 'N/A'}/10</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-gray-500">Crime Rating</dt>
+                      <dd className="font-medium">{analysis.market_data.crime_rating || 'N/A'}/10</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-gray-500">Walk Score</dt>
+                      <dd className="font-medium">{analysis.market_data.walk_score || 'N/A'}/100</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-gray-500">Transit Score</dt>
+                      <dd className="font-medium">{analysis.market_data.transit_score || 'N/A'}/100</dd>
+                    </div>
+                  </dl>
+                </div>
+              </div>
+            </div>
           )}
-        
-      
+        </div>
+      </div>
 
       {/* Similar Properties */}
       {similarProperties.length > 0 && (
-        
-          Similar Properties
-          
-        
+        <div className="bg-white rounded-lg shadow p-6">
+          <h2 className="text-xl font-semibold mb-4">Similar Properties</h2>
+          <ComparisonTable properties={similarProperties} />
+        </div>
       )}
-    
+    </div>
   );
 };
 
-// Helper function to get color based on score
 function getScoreColor(score) {
-  if (score >= 85) return '#22c55e'; // green-500
-  if (score >= 70) return '#16a34a'; // green-600
-  if (score >= 55) return '#ca8a04'; // yellow-600
-  if (score >= 40) return '#ea580c'; // orange-600
-  return '#dc2626'; // red-600
+  if (!score) return '#6B7280';
+  if (score >= 85) return '#22c55e';
+  if (score >= 70) return '#16a34a';
+  if (score >= 55) return '#ca8a04';
+  if (score >= 40) return '#ea580c';
+  return '#dc2626';
 }
 
-// Helper function to format property type
 function formatPropertyType(type) {
   if (!type) return 'N/A';
   return type.split('_').map(word =>

@@ -1,14 +1,12 @@
-from flask import request, jsonify
+from flask import request
 from flask_restful import Resource
 from models.property import Property
 from models.market import Market
 from services.analysis.financial_metrics import FinancialMetrics
 from services.analysis.tax_benefits import TaxBenefits
 from services.analysis.financing_options import FinancingOptions
-from services.analysis.opportunity_scoring import OpportunityScoring
 from services.geographic.market_aggregator import MarketAggregator
 from utils.database import get_db
-from bson import ObjectId
 import traceback
 
 class PropertyAnalysisResource(Resource):
