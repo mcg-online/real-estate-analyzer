@@ -88,8 +88,10 @@ class RiskAssessment:
         {"mobile home", "manufactured", "co-op", "land", "farm", "commercial"}
     )
 
-    # Current calendar year used for property age calculations.
-    _CURRENT_YEAR: int = datetime.now().year
+    @staticmethod
+    def _current_year() -> int:
+        """Return the current calendar year (evaluated at call time)."""
+        return datetime.now().year
 
     def __init__(self, property_data: Any, market_data: dict[str, Any]) -> None:
         self.property = property_data
@@ -215,7 +217,7 @@ class RiskAssessment:
 
         # --- Signal 1: age risk -----------------------------------------
         if year_built:
-            age = max(0, self._CURRENT_YEAR - int(year_built))
+            age = max(0, self._current_year() - int(year_built))
             # Properties up to 10 years old: minimal risk (0–1).
             # 10–30 years: low-moderate (1–4).
             # 30–60 years: moderate-high (4–7).
@@ -459,7 +461,7 @@ class RiskAssessment:
         ).lower()
 
         if year_built:
-            age = max(0, self._CURRENT_YEAR - int(year_built))
+            age = max(0, self._current_year() - int(year_built))
             if age > 60:
                 factors.append(
                     f"Property is {age} years old — expect elevated capital "
@@ -568,7 +570,7 @@ class RiskAssessment:
         # Property condition recommendations
         year_built: int | None = self._prop("year_built")
         if year_built:
-            age = max(0, self._CURRENT_YEAR - int(year_built))
+            age = max(0, self._current_year() - int(year_built))
             if age > 30:
                 recs.append(
                     "Commission a full structural inspection and obtain quotes "

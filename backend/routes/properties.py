@@ -6,21 +6,12 @@ from models.property import Property
 from utils.database import get_db
 from utils.errors import error_response
 from bson import ObjectId
-from bson.errors import InvalidId
+from utils.validation import is_valid_objectid as _is_valid_objectid
 import logging
 
 logger = logging.getLogger(__name__)
 
 ALLOWED_PROPERTY_TYPES = ['single_family', 'condo', 'townhouse', 'multi_family', 'land', 'commercial']
-
-
-def _is_valid_objectid(value):
-    """Check if value is a valid 24-character hex ObjectId string."""
-    try:
-        ObjectId(value)
-        return True
-    except (InvalidId, TypeError):
-        return False
 
 
 def validate_property_data(data, require_all=True):
@@ -110,24 +101,33 @@ class PropertyListResource(Resource):
     def get(self):
         """Get list of properties with filtering options"""
         try:
-            # Parse query parameters
+            # Parse and validate query parameters
             filters = {}
-            price_min = request.args.get('minPrice')
-            price_max = request.args.get('maxPrice')
-            if price_min or price_max:
-                filters['price'] = {}
-                if price_min:
-                    filters['price']['$gte'] = int(price_min)
-                if price_max:
-                    filters['price']['$lte'] = int(price_max)
+            try:
+                price_min = request.args.get('minPrice')
+                price_max = request.args.get('maxPrice')
+                if price_min or price_max:
+                    filters['price'] = {}
+                    if price_min:
+                        filters['price']['$gte'] = int(price_min)
+                    if price_max:
+                        filters['price']['$lte'] = int(price_max)
 
-            bedrooms_min = request.args.get('minBedrooms')
-            if bedrooms_min:
-                filters['bedrooms'] = {'$gte': float(bedrooms_min)}
+                bedrooms_min = request.args.get('minBedrooms')
+                if bedrooms_min:
+                    filters['bedrooms'] = {'$gte': float(bedrooms_min)}
 
-            bathrooms_min = request.args.get('minBathrooms')
-            if bathrooms_min:
-                filters['bathrooms'] = {'$gte': float(bathrooms_min)}
+                bathrooms_min = request.args.get('minBathrooms')
+                if bathrooms_min:
+                    filters['bathrooms'] = {'$gte': float(bathrooms_min)}
+
+                score_min = request.args.get('minScore')
+                if score_min:
+                    filters['score'] = {'$gte': float(score_min)}
+            except (ValueError, TypeError):
+                return error_response(
+                    'Invalid numeric filter parameter', 'VALIDATION_ERROR', 400
+                )
 
             property_type = request.args.get('propertyType')
             if property_type:
@@ -145,13 +145,14 @@ class PropertyListResource(Resource):
             if zip_code:
                 filters['zip_code'] = zip_code
 
-            score_min = request.args.get('minScore')
-            if score_min:
-                filters['score'] = {'$gte': float(score_min)}
-
-            # Pagination
-            limit = int(request.args.get('limit', 50))
-            page = int(request.args.get('page', 1))
+            # Pagination with bounds validation
+            try:
+                limit = max(1, min(100, int(request.args.get('limit', 50))))
+                page = max(1, int(request.args.get('page', 1)))
+            except (ValueError, TypeError):
+                return error_response(
+                    'Invalid pagination parameter', 'VALIDATION_ERROR', 400
+                )
             skip = (page - 1) * limit
 
             # Sorting
@@ -193,7 +194,9 @@ class PropertyListResource(Resource):
     def post(self):
         """Create a new property"""
         try:
-            data = request.get_json()
+            data = request.get_json(silent=True)
+            if not data or not isinstance(data, dict):
+                return error_response('Request body must be JSON', 'VALIDATION_ERROR', 400)
 
             # Validate required fields presence
             required_fields = ['address', 'price', 'bedrooms', 'bathrooms', 'sqft',
@@ -274,16 +277,24 @@ class PropertyResource(Resource):
             if not property:
                 return error_response('Property not found', 'NOT_FOUND', 404)
 
-            data = request.get_json()
+            data = request.get_json(silent=True)
+            if not data or not isinstance(data, dict):
+                return error_response('Request body must be JSON', 'VALIDATION_ERROR', 400)
 
             # Validate only the fields being updated
             is_valid, error_msg = validate_property_data(data, require_all=False)
             if not is_valid:
                 return error_response(error_msg, 'VALIDATION_ERROR', 400)
 
-            # Update fields
+            # Update only whitelisted fields
+            UPDATABLE_FIELDS = {
+                'address', 'city', 'state', 'zip_code', 'price', 'bedrooms',
+                'bathrooms', 'sqft', 'year_built', 'property_type', 'lot_size',
+                'listing_url', 'source', 'latitude', 'longitude', 'images',
+                'description'
+            }
             for key, value in data.items():
-                if key != '_id' and hasattr(property, key):
+                if key in UPDATABLE_FIELDS:
                     setattr(property, key, value)
 
             # Save changes

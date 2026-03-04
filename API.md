@@ -44,6 +44,10 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 
 JWT tokens are issued by the login endpoint and are required for all protected endpoints. Tokens are signed using the `JWT_SECRET` environment variable.
 
+### Token Expiration
+
+Tokens expire after a configurable period (default: 1 hour). The expiration is set via `JWT_EXPIRY_SECONDS` environment variable.
+
 ## Rate Limiting
 
 API requests are rate limited per IP address to ensure fair usage and service stability.
@@ -53,6 +57,21 @@ API requests are rate limited per IP address to ensure fair usage and service st
 - **Hourly limit**: 50 requests per hour
 
 When rate limit is exceeded, the API returns a 429 (Too Many Requests) status code.
+
+## Security Headers
+
+The API returns security headers on every response to protect against common web vulnerabilities:
+
+| Header | Value | Purpose |
+|--------|-------|---------|
+| `Content-Security-Policy` | `default-src 'self'; frame-ancestors 'none'` | Prevents inline scripts and framing attacks |
+| `X-Content-Type-Options` | `nosniff` | Prevents MIME type sniffing |
+| `X-Frame-Options` | `DENY` | Prevents clickjacking attacks |
+| `X-XSS-Protection` | `1; mode=block` | Enables XSS protection in older browsers |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` | Controls referrer information |
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` | Enforces HTTPS (production only) |
+
+These headers are automatically applied to all responses and do not require any special configuration.
 
 ## Health Checks
 
@@ -87,7 +106,7 @@ Deep readiness check that verifies critical dependencies. This checks MongoDB co
       "status": "ok"
     }
   },
-  "version": "1.2.0"
+  "version": "1.4.0"
 }
 ```
 
@@ -105,7 +124,7 @@ Deep readiness check that verifies critical dependencies. This checks MongoDB co
       "detail": "No heartbeat for 720s"
     }
   },
-  "version": "1.2.0"
+  "version": "1.4.0"
 }
 ```
 
@@ -150,6 +169,10 @@ List properties with support for filtering, pagination, and sorting.
 | `page` | integer | 1 | Page number for pagination |
 | `sortBy` | string | "price" | Field to sort by (e.g., "price", "bedrooms", "score") |
 | `sortOrder` | string | "asc" | Sort direction: "asc" for ascending, "desc" for descending |
+
+**Validation:**
+- All numeric filter parameters (`minPrice`, `maxPrice`, `minBedrooms`, `minBathrooms`, `minScore`) are validated. Non-numeric values return 400.
+- Pagination: `limit` is clamped to [1, 100], `page` is clamped to >= 1.
 
 **Example Request:**
 
@@ -286,6 +309,16 @@ Create a new property in the system.
 }
 ```
 
+**Error Response (400 Bad Request - null/missing body):**
+```json
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Request body must be JSON"
+  }
+}
+```
+
 ---
 
 ### GET /api/properties/<property_id>
@@ -360,6 +393,9 @@ Update a property. Send only the fields you want to modify.
 }
 ```
 
+**Updatable Fields:**
+Only the following fields can be updated: `address`, `city`, `state`, `zip_code`, `price`, `bedrooms`, `bathrooms`, `sqft`, `year_built`, `property_type`, `lot_size`, `listing_url`, `description`, `images`, `latitude`, `longitude`. Fields like `_id`, `created_at`, `metrics`, and `score` are protected.
+
 **Example Request:**
 
 ```bash
@@ -400,6 +436,16 @@ curl -X PUT "http://localhost:5000/api/properties/507f1f77bcf86cd799439011" \
 ```json
 {
   "error": "Property not found"
+}
+```
+
+**Error Response (400 Bad Request - null/missing body):**
+```json
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Request body must be JSON"
+  }
 }
 ```
 
@@ -571,26 +617,23 @@ All parameters are optional. Defaults are shown below:
   "term_years": 25,
   "holding_period": 7,
   "appreciation_rate": 0.04,
-  "tax_bracket": 0.24,
-  "credit_score": 750,
-  "veteran": false,
-  "first_time_va": true
+  "tax_bracket": 0.24
 }
 ```
 
 **Parameter Descriptions:**
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `down_payment_percentage` | float | 0.20 | Down payment as percentage (0.0-1.0) |
-| `interest_rate` | float | 0.045 | Mortgage interest rate (0.0-0.15) |
-| `term_years` | integer | 30 | Loan term in years (5-40) |
-| `holding_period` | integer | 5 | Years to hold property (1-50) |
-| `appreciation_rate` | float | 0.03 | Annual property appreciation rate (0.0-0.10) |
-| `tax_bracket` | float | 0.22 | Federal income tax bracket (0.10-0.37) |
-| `credit_score` | integer | 720 | Credit score (300-850) |
-| `veteran` | boolean | false | Is the buyer a veteran? |
-| `first_time_va` | boolean | true | Is this first time using VA benefits? |
+| Parameter | Type | Default | Min | Max | Description |
+|-----------|------|---------|-----|-----|-------------|
+| `down_payment_percentage` | float | 0.20 | 0.01 | 0.99 | Down payment as decimal |
+| `interest_rate` | float | 0.045 | 0.001 | 0.30 | Annual interest rate |
+| `term_years` | int | 30 | 1 | 40 | Loan term in years |
+| `holding_period` | int | 5 | 1 | 30 | Investment holding period |
+| `appreciation_rate` | float | 0.03 | -0.10 | 0.20 | Annual appreciation rate |
+| `tax_bracket` | float | 0.22 | 0.0 | 0.50 | Federal tax bracket |
+
+**Validation:**
+All numeric parameters are clamped to their valid ranges. Invalid (non-numeric) values return 400.
 
 **Example Request:**
 
@@ -608,22 +651,11 @@ curl -X POST "http://localhost:5000/api/analysis/property/507f1f77bcf86cd7994390
 
 **Response (200 OK):**
 
-Same structure as GET endpoint, with the addition of a `parameters` field showing the custom inputs used:
+Same structure as GET endpoint:
 
 ```json
 {
   "property_id": "507f1f77bcf86cd799439011",
-  "parameters": {
-    "down_payment_percentage": 0.25,
-    "interest_rate": 0.05,
-    "term_years": 25,
-    "holding_period": 5,
-    "appreciation_rate": 0.03,
-    "tax_bracket": 0.24,
-    "credit_score": 720,
-    "veteran": false,
-    "first_time_va": true
-  },
   "financial_analysis": {
     "monthly_rent": 1666.67,
     "monthly_expenses": {...},
@@ -646,6 +678,16 @@ Same structure as GET endpoint, with the addition of a `parameters` field showin
   "tax_benefits": {...},
   "financing_options": {...},
   "market_data": {...}
+}
+```
+
+**Error Response (400 Bad Request - null/missing body):**
+```json
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Request body must be JSON"
+  }
 }
 ```
 
@@ -779,10 +821,10 @@ Get top performing markets ranked by investment metrics. Useful for identifying 
 
 **Query Parameters:**
 
-| Parameter | Type | Default | Max | Description |
-|-----------|------|---------|-----|-------------|
-| `metric` | string | "roi" | - | Ranking metric: "roi" or "cap_rate" |
-| `limit` | integer | 10 | 100 | Number of top markets to return |
+| Parameter | Type | Default | Min | Max | Description |
+|-----------|------|---------|-----|-----|-------------|
+| `metric` | string | "roi" | - | - | Ranking metric: "roi" or "cap_rate" |
+| `limit` | integer | 10 | 1 | 100 | Number of top markets to return. Non-numeric values return 400. |
 
 **Example Requests:**
 
@@ -838,10 +880,20 @@ curl -X GET "http://localhost:5000/api/markets/top?metric=cap_rate&limit=20" \
 ]
 ```
 
-**Error Response (400 Bad Request):**
+**Error Response (400 Bad Request - invalid metric):**
 ```json
 {
   "error": "Invalid metric"
+}
+```
+
+**Error Response (400 Bad Request - invalid limit):**
+```json
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Invalid limit parameter"
+  }
 }
 ```
 
@@ -866,7 +918,11 @@ Register a new user account.
 
 **Required Fields:**
 - `username`: string (required, must be unique)
-- `password`: string (required, minimum 8 characters recommended)
+  - Length: 3-64 characters
+  - Allowed characters: alphanumeric plus `_`, `.`, `-` only
+- `password`: string (required)
+  - Minimum: 8 characters
+  - Must contain uppercase letter, lowercase letter, and digit
 
 **Example Request:**
 
@@ -893,10 +949,30 @@ curl -X POST "http://localhost:5000/api/auth/register" \
 }
 ```
 
-**Error Response (400 Bad Request):**
+**Error Response (400 Bad Request - blank username):**
 ```json
 {
   "error": "Username cannot be blank"
+}
+```
+
+**Error Response (400 Bad Request - invalid length):**
+```json
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Username must be 3-64 characters"
+  }
+}
+```
+
+**Error Response (400 Bad Request - invalid characters):**
+```json
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Username may only contain letters, digits, underscores, dots, and hyphens"
+  }
 }
 ```
 
@@ -1151,6 +1227,6 @@ For API issues, questions, or feature requests:
 
 ---
 
-**API Version:** 1.2.0
+**API Version:** 1.4.0
 **Last Updated:** 2026-03-03
 **Documentation Status:** Current

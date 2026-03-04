@@ -5,11 +5,17 @@ const FinancingCalculator = ({ property, financingOptions, onParamChange, params
 
   const handleParamChange = (e) => {
     const { name, value, type, checked } = e.target;
-    const processedValue = type === 'checkbox'
-      ? checked
-      : type === 'number'
-        ? (name.includes('percentage') ? parseFloat(value) / 100 : parseFloat(value))
-        : value;
+    let processedValue;
+    if (type === 'checkbox') {
+      processedValue = checked;
+    } else if (name === 'down_payment_percentage' || name === 'interest_rate') {
+      // Sliders display whole-number percentages; convert to decimal fraction
+      processedValue = parseFloat(value) / 100;
+    } else if (type === 'number') {
+      processedValue = parseFloat(value);
+    } else {
+      processedValue = value;
+    }
     onParamChange(name, processedValue);
   };
 
@@ -42,7 +48,7 @@ const FinancingCalculator = ({ property, financingOptions, onParamChange, params
             ))}
           </div>
 
-          {options.length > 0 && (
+          {options.length > 0 && selectedOption < options.length && (
             <div>
               <h4 className="font-medium mb-3">{options[selectedOption].type} Loan Details</h4>
               <dl className="space-y-2">

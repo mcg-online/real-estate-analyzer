@@ -1,7 +1,5 @@
 from flask import request
 from flask_restful import Resource
-from bson import ObjectId
-from bson.errors import InvalidId
 from models.property import Property
 from models.market import Market
 from services.analysis.financial_metrics import FinancialMetrics
@@ -11,18 +9,10 @@ from services.analysis.opportunity_scoring import OpportunityScoring
 from services.geographic.market_aggregator import MarketAggregator
 from utils.database import get_db
 from utils.errors import error_response
+from utils.validation import is_valid_objectid as _is_valid_objectid
 import logging
 
 logger = logging.getLogger(__name__)
-
-
-def _is_valid_objectid(value):
-    """Check if value is a valid 24-character hex ObjectId string."""
-    try:
-        ObjectId(value)
-        return True
-    except (InvalidId, TypeError):
-        return False
 
 
 # Default market data used when no market is found in the database
@@ -104,26 +94,39 @@ class PropertyAnalysisResource(Resource):
             if not property_obj:
                 return error_response('Property not found', 'NOT_FOUND', 404)
 
-            data = request.get_json()
+            data = request.get_json(silent=True)
+            if not data or not isinstance(data, dict):
+                return error_response('Request body must be JSON', 'VALIDATION_ERROR', 400)
             market_data = _get_market_dict(property_obj)
+
+            # Validate and bound user-supplied parameters
+            try:
+                down_pct = max(0.01, min(0.99, float(data.get('down_payment_percentage', 0.20))))
+                interest = max(0.001, min(0.30, float(data.get('interest_rate', 0.045))))
+                term = max(1, min(40, int(data.get('term_years', 30))))
+                holding = max(1, min(30, int(data.get('holding_period', 5))))
+                appreciation = max(-0.10, min(0.20, float(data.get('appreciation_rate', 0.03))))
+                tax_bracket = max(0.0, min(0.50, float(data.get('tax_bracket', 0.22))))
+            except (ValueError, TypeError):
+                return error_response('Invalid numeric parameter', 'VALIDATION_ERROR', 400)
 
             # Custom financial analysis
             financial_metrics = FinancialMetrics(property_obj, market_data)
             analysis = financial_metrics.analyze_property(
-                down_payment_percentage=data.get('down_payment_percentage', 0.20),
-                interest_rate=data.get('interest_rate', 0.045),
-                term_years=data.get('term_years', 30),
-                holding_period=data.get('holding_period', 5),
-                appreciation_rate=data.get('appreciation_rate', 0.03)
+                down_payment_percentage=down_pct,
+                interest_rate=interest,
+                term_years=term,
+                holding_period=holding,
+                appreciation_rate=appreciation
             )
 
             # Custom tax analysis
             tax_benefits = TaxBenefits(property_obj, market_data)
             tax_analysis = tax_benefits.analyze_tax_benefits(
-                tax_bracket=data.get('tax_bracket', 0.22),
-                down_payment_percentage=data.get('down_payment_percentage', 0.20),
-                interest_rate=data.get('interest_rate', 0.045),
-                term_years=data.get('term_years', 30)
+                tax_bracket=tax_bracket,
+                down_payment_percentage=down_pct,
+                interest_rate=interest,
+                term_years=term
             )
 
             # Custom financing analysis
@@ -195,7 +198,6 @@ class MarketAnalysisResource(Resource):
             if not market:
                 return error_response('Market not found', 'NOT_FOUND', 404)
 
-            data = request.get_json()
             db = get_db()
             aggregator = MarketAggregator(db)
 
@@ -212,7 +214,6 @@ class MarketAnalysisResource(Resource):
                 'market_id': str(market._id),
                 'market_name': market.name,
                 'market_type': market.market_type,
-                'parameters': data,
                 'aggregate_data': aggregate_data,
                 'market_metrics': market.metrics
             }
@@ -248,7 +249,10 @@ class TopMarketsResource(Resource):
     def get(self):
         """Get top performing markets based on investment metrics"""
         try:
-            limit = min(int(request.args.get('limit', 10)), 100)
+            try:
+                limit = max(1, min(int(request.args.get('limit', 10)), 100))
+            except (ValueError, TypeError):
+                return error_response('Invalid limit parameter', 'VALIDATION_ERROR', 400)
             metric = request.args.get('metric', 'roi')
 
             db = get_db()

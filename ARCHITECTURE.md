@@ -69,15 +69,28 @@ The Flask application initializes and coordinates all backend services.
 
 **properties.py - Property Management**
 - `GET /properties` - List all properties with filtering, pagination, sorting (paginated envelope response)
+  - Query parameter validation: all numeric filters validated (returns 400 on malformed input)
+  - Pagination bounds: limit clamped [1,100], page clamped >= 1
 - `GET /properties/<id>` - Retrieve single property details
 - `POST /properties` - Create new property listing
+  - Null/invalid body handling: returns 400 on missing or invalid JSON
 - `PUT /properties/<id>` - Update property information
+  - Null/invalid body handling: returns 400 on missing or invalid JSON
+  - Mass assignment prevention: whitelists updatable fields (address, city, state, zip_code, price, bedrooms, bathrooms, sqft, year_built, property_type, lot_size, listing_url, description, images, latitude, longitude)
 - `DELETE /properties/<id>` - Remove property from system
 - ObjectId format validation on all ID-based endpoints (returns 400 on invalid IDs)
 
 **analysis.py - Investment Analysis**
 - Composes multiple analysis services
 - Converts Market objects to dictionaries for service layer compatibility
+- POST parameter bounds validation on analysis endpoints:
+  - down_payment_percentage: [0.01, 0.99]
+  - interest_rate: [0.001, 0.30]
+  - term_years: [1, 40]
+  - holding_period: [1, 30]
+  - appreciation_rate: [-0.10, 0.20]
+  - tax_bracket: [0.0, 0.50]
+  - TopMarkets limit validation with 400 on non-numeric input
 - Endpoints:
   - `GET /analysis/financial/<property_id>` - Financial metrics
   - `GET /analysis/risk/<property_id>` - Risk assessment
@@ -88,6 +101,7 @@ The Flask application initializes and coordinates all backend services.
 
 **users.py - Authentication**
 - `POST /auth/register` - User registration
+  - Username validation: 3-64 characters, regex pattern [a-zA-Z0-9_.-], stripped before validation
 - `POST /auth/login` - User authentication and JWT token generation
 - JWT auth with bcrypt password hashing
 - Token validation on protected routes
@@ -99,7 +113,7 @@ Analysis services accept (property_obj, market_dict) pairs and return computed r
 **financial_metrics.py**
 - Calculates investment financial metrics
 - Metrics:
-  - ROI (Return on Investment)
+  - ROI (Return on Investment) with zero-investment guard (returns 0 when down_payment + closing_costs <= 0)
   - Cap Rate (Capitalization Rate)
   - Cash-on-Cash Return
   - Break-Even Analysis
@@ -126,6 +140,7 @@ Analysis services accept (property_obj, market_dict) pairs and return computed r
   - Financing risk
 - Risk score aggregation (0-100)
 - Mitigation recommendations
+- Dynamic `_current_year()` method replaces stale `_CURRENT_YEAR` class constant
 
 **tax_benefits.py**
 - Tax advantage calculations for real estate investments
@@ -146,6 +161,7 @@ Analysis services accept (property_obj, market_dict) pairs and return computed r
   - PMI (Private Mortgage Insurance)
   - MIP (Mortgage Insurance Premium for FHA)
   - Funding fees (VA loans)
+  - Zero interest rate division-by-zero guards in all three calculator methods
 - Monthly payment estimation
 - Total cost of borrowing analysis
 
@@ -155,6 +171,7 @@ Analysis services accept (property_obj, market_dict) pairs and return computed r
 - Safety filters (sqft > 0) prevent MongoDB calculation errors
 - Performance optimized queries
 - Market trend calculations
+- Fixed field names: `avg_bedrooms` and `avg_bathrooms` (previously misleadingly named `median_*`)
 
 **Data Collection Services**
 
@@ -191,6 +208,10 @@ Analysis services accept (property_obj, market_dict) pairs and return computed r
 - `error_response(message, code, status)` - Structured error JSON responses
 - Returns `{"error": {"code": "...", "message": "..."}}` format
 
+**validation.py - Shared Input Validation**
+- `_is_valid_objectid(id_string)` - Validates MongoDB ObjectId format (extracted from routes layer)
+- Ensures all ID-based endpoints return 400 on invalid ObjectId format
+
 **database.py - Database Connection Management**
 - Thread-safe MongoDB connection pooling
 - Connection health checks via ping on every get_db() call
@@ -211,7 +232,7 @@ Analysis services accept (property_obj, market_dict) pairs and return computed r
 ### Technology Stack
 - **Framework**: React 17 (React Hooks for state management)
 - **Routing**: React Router v5
-- **HTTP Client**: Axios with interceptors
+- **HTTP Client**: Centralized apiClient (services/api.js) with JWT interceptors — all components use this instead of raw axios
 - **Styling**: Tailwind CSS
 - **Charts**: Chart.js via react-chartjs-2
 - **Maps**: Leaflet via react-leaflet
@@ -221,15 +242,15 @@ Analysis services accept (property_obj, market_dict) pairs and return computed r
 - `/property/:id` - Property detail page
 - `/login` - Authentication
 
-### Component Architecture (14 Components)
+### Component Architecture (15 Components)
 
 **Page Components:**
 - **Dashboard** - Main property browsing interface with search and filtering
-- **PropertyDetail** - Comprehensive property analysis view
+- **PropertyDetail** - Comprehensive property analysis view with URL scheme validation (http/https only)
 - **Login** - User authentication form
 
 **Feature Components:**
-- **MapView** - Interactive property location map
+- **MapView** - Interactive property location map with XSS prevention (escapeHtml() sanitizes map popups); uses separate useEffect hooks for init (runs once) vs marker update (runs on data change)
 - **MarketMetricsChart** - Market trends visualization
 - **PropertyCard** - Compact property display card
 - **FilterPanel** - Advanced property filtering interface
@@ -240,13 +261,16 @@ Analysis services accept (property_obj, market_dict) pairs and return computed r
 - **ComparisonTable** - Side-by-side property comparison
 - **TaxBenefits** - Tax advantage breakdown
 - **FinancingCalculator** - Loan program comparison tool
+- **ErrorBoundary** - Component-level error handling to prevent white-screen crashes
 
 ### API Integration (services/api.js)
+- Centralized apiClient: single source of truth for all HTTP requests across the application
 - Axios HTTP client with request/response interceptors
 - Automatic JWT token injection on authenticated requests
-- Centralized error handling
+- Centralized error handling with structured error responses
 - Base URL configuration for API endpoints
 - Methods for all backend API operations
+- Consistent response envelope handling (data, total, page, limit, pages)
 
 ## Database Schema
 
@@ -342,7 +366,7 @@ Analysis services accept (property_obj, market_dict) pairs and return computed r
 
 ### Authentication & Authorization
 - **JWT Authentication** (Flask-JWT-Extended)
-  - Token generation on successful login
+  - Token generation on successful login with configurable expiration (default 1 hour via JWT_ACCESS_TOKEN_EXPIRES)
   - Token validation on protected routes
   - JWT_SECRET_KEY configured and validated at startup
 - **Password Security**
@@ -355,6 +379,16 @@ Analysis services accept (property_obj, market_dict) pairs and return computed r
 - 50 requests per hour per IP address
 - Protects against brute force and DoS attacks
 
+### Input Validation & Sanitization
+- **XSS Prevention**: HTML escaping via `escapeHtml()` sanitizes all user data in map popups
+- **URL Scheme Validation**: Listing URLs restricted to http/https schemes only
+- **Username Format Validation**: 3-64 characters, regex pattern [a-zA-Z0-9_.-], stripped before validation
+- **Analysis Parameter Bounds**: All financial inputs validated against safe ranges (down_payment_percentage, interest_rate, term_years, holding_period, appreciation_rate, tax_bracket)
+- **Null Body Handling**: POST/PUT endpoints return 400 on missing or invalid JSON (prevents 500 errors)
+- **Mass Assignment Prevention**: PUT /properties whitelists updatable fields to prevent unintended attribute modification
+- **Query Parameter Type Validation**: All numeric filter parameters validated, malformed input returns 400
+- **Pagination Bounds Enforcement**: limit clamped [1,100], page clamped >= 1
+
 ### Request Security
 - CORS enabled for frontend communication
 - Input validation on all required fields
@@ -366,6 +400,14 @@ Analysis services accept (property_obj, market_dict) pairs and return computed r
 - Division-by-zero guards in all financial calculations
 - Input validation before database operations
 - Aggregation pipeline filters (sqft > 0) prevent MongoDB calculation errors
+
+### Security Headers
+- **Content-Security-Policy**: default-src 'self'; frame-ancestors 'none'
+- **X-Content-Type-Options**: nosniff (prevents MIME sniffing attacks)
+- **X-Frame-Options**: DENY (prevents clickjacking)
+- **X-XSS-Protection**: 1; mode=block (legacy XSS protection)
+- **Referrer-Policy**: strict-origin-when-cross-origin (controls referrer leakage)
+- **Strict-Transport-Security**: enforced in production only (HSTS preload ready)
 
 ## Resilience & Reliability
 

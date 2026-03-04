@@ -13,7 +13,7 @@ Full-stack real estate investment analysis tool with three main components:
 ```bash
 cd backend && source venv/bin/activate && pytest tests/ -v
 ```
-Run the comprehensive test suite (367 tests across 7 files).
+Run the comprehensive test suite (405 tests across 8 files).
 
 ### Backend Validation
 ```bash
@@ -89,7 +89,7 @@ assert result == pytest.approx(expected, abs=2.0)
 ### Test Coverage
 - All tests run without MongoDB (fully mocked with MagicMock)
 - No external dependencies required to run test suite
-- 367 tests total across test_*.py files in backend/tests/
+- 405 tests total across test_*.py files in backend/tests/
 
 ## Database
 
@@ -132,7 +132,7 @@ real-estate-analyzer/
 │   ├── routes/                 # API endpoints
 │   ├── services/               # Business logic (financial, risk, opportunity)
 │   ├── utils/                  # Database, logging, utilities
-│   └── tests/                  # Comprehensive pytest suite (367 tests)
+│   └── tests/                  # Comprehensive pytest suite (405 tests)
 ├── frontend/
 │   ├── src/
 │   │   ├── App.js             # React Router setup
@@ -145,18 +145,40 @@ real-estate-analyzer/
 ├── docker-compose.yml          # Service orchestration (Flask, MongoDB, Node)
 ├── Dockerfile                  # Production Flask server with gunicorn
 ├── CHANGELOG.md                # Version history
+├── CODEMAP.md                  # Complete code map with data flows
+├── TODO.md                     # Known issues, roadmap, testing gaps
+├── SECURITY.md                 # Security policy and features
 └── CLAUDE.md                   # This file
 ```
 
-## Recent Changes (v1.2.0)
+## Recent Changes (v1.4.0)
+
+- Dashboard and PropertyDetail now use `apiClient` with JWT auth (was bypassing auth with raw `axios`)
+- XSS prevention: map popup HTML escaping, listing URL scheme validation
+- Username validation: 3-64 chars, alphanumeric only
+- Analysis POST parameter bounds: validates and clamps all numeric params (prevents ZeroDivisionError)
+- Null body crash prevention: POST/PUT return 400 when body missing (was 500)
+- Fixed MapView lifecycle: separate init/marker useEffect hooks (no more destroy/recreate on every render)
+- Fixed FinancingCalculator interest rate slider value inversion
+- Fixed `calculate_roi()` ZeroDivisionError on zero initial investment
+- Fixed scheduler not starting under gunicorn (moved `run_scheduled_tasks()` to module level)
+- Removed dead code in Dashboard.js and MarketAnalysis POST
+- 15 new tests (405 total, all passing)
+
+### v1.3.0
+
+- Fixed mass assignment vulnerability, query param validation, pagination bounds
+- Added CSP header, JWT token expiration, ErrorBoundary, 404 route
+- Fixed datetime deprecation, zero-interest-rate division-by-zero
+- Fixed frontend paginated response handling, MapView memory leak
+- 390 tests
+
+### v1.2.0
 
 - Removed numpy dependency (replaced with pure Python clamping)
 - Added ObjectId format validation on all ID-based routes (400 on invalid IDs)
 - Fixed `datetime.utcnow()` deprecation across models (now timezone-aware)
 - Added scheduler thread watchdog with heartbeat and auto-restart
-- Readiness endpoint now checks scheduler health
-- Fixed stale `CURRENT_YEAR` module-level constant
-- Fixed 5 failing tests for paginated response format and structured errors
 - 367 tests all passing
 
 ### v1.1.0

@@ -453,6 +453,18 @@ class TestCalculateRoi:
         expected_fv = round(800_000 * (1.03 ** 5), 2)
         assert result['future_value'] == expected_fv
 
+    def test_zero_investment_returns_zero_roi(self, mock_property, default_market_data):
+        """calculate_roi with zero initial investment should return 0 ROI, not ZeroDivisionError."""
+        fm = make_metrics(mock_property, default_market_data)
+        result = fm.calculate_roi(
+            annual_cash_flow=5000, down_payment=0, closing_costs=0
+        )
+        assert result['total_roi'] == 0.0
+        assert result['annualized_roi'] == 0.0
+        # Other fields should still be computed
+        assert 'future_value' in result
+        assert 'total_cash_flow' in result
+
 
 # ---------------------------------------------------------------------------
 # calculate_break_even_point

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { BrowserRouter as Router, Route, Switch, Link } from 'react-router-dom';
 import Dashboard from './components/Dashboard';
 import PropertyDetail from './components/PropertyDetail';
+import ErrorBoundary from './components/ErrorBoundary';
 
 const Login = () => {
   const [username, setUsername] = useState('');
@@ -66,8 +67,17 @@ const Login = () => {
   );
 };
 
+const NotFound = () => (
+  <div className="text-center py-20">
+    <h1 className="text-4xl font-bold text-gray-400 mb-4">404</h1>
+    <p className="text-gray-600 mb-4">Page not found.</p>
+    <Link to="/" className="text-blue-600 hover:text-blue-800">Back to Dashboard</Link>
+  </div>
+);
+
 const App = () => {
   return (
+    <ErrorBoundary>
     <Router>
       <div className="min-h-screen bg-gray-100">
         <nav className="bg-white shadow-sm border-b">
@@ -93,10 +103,12 @@ const App = () => {
             <Route exact path="/" component={Dashboard} />
             <Route path="/property/:id" component={PropertyDetail} />
             <Route path="/login" component={Login} />
+            <Route component={NotFound} />
           </Switch>
         </main>
       </div>
     </Router>
+    </ErrorBoundary>
   );
 };
 

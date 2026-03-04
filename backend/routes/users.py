@@ -15,6 +15,15 @@ user_parser.add_argument('username', type=str, required=True, help="Username can
 user_parser.add_argument('password', type=str, required=True, help="Password cannot be blank")
 
 
+def _validate_username(username):
+    username = username.strip()
+    if not username or len(username) < 3 or len(username) > 64:
+        return "Username must be 3-64 characters"
+    if not re.match(r'^[a-zA-Z0-9_.\-]+$', username):
+        return "Username may only contain letters, digits, underscores, dots, and hyphens"
+    return None
+
+
 def _validate_password(password):
     if len(password) < 8:
         return "Password must be at least 8 characters"
@@ -60,8 +69,12 @@ class UserRegistration(Resource):
             failure.
         """
         data = user_parser.parse_args()
-        username = data['username']
+        username = data['username'].strip()
         password = data['password']
+
+        error = _validate_username(username)
+        if error:
+            return {'message': error}, 400
 
         error = _validate_password(password)
         if error:

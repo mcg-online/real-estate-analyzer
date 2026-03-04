@@ -5,6 +5,67 @@ All notable changes to the Real Estate Analyzer project will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-03-03
+
+### Security Fixes
+- **XSS prevention**: Map popup content now escapes all property data before injecting into HTML
+- **Listing URL validation**: Property detail page only renders `href` links with `http://` or `https://` schemes, blocking `javascript:` URLs
+- **Username validation**: Registration now enforces 3-64 character limit and alphanumeric-only (`[a-zA-Z0-9_.-]`), preventing pathological inputs
+- **Analysis parameter bounds**: POST `/api/analysis/property/<id>` now validates and bounds all user-supplied numeric params (`term_years` clamped to [1,40], `holding_period` to [1,30], `interest_rate` to [0.001,0.30], etc.) — prevents ZeroDivisionError from `term_years=0` or `holding_period=0`
+- **Null body crash prevention**: POST/PUT endpoints return 400 with structured error when request body is missing or not valid JSON (was 500 TypeError)
+
+### Bug Fixes
+- **Critical**: Dashboard and PropertyDetail now use the configured `apiClient` from `api.js` instead of raw `axios` — JWT auth tokens are now sent with all API requests
+- **Critical**: MapView no longer destroys and recreates the Leaflet map on every render — init and marker update are now separate `useEffect` hooks
+- **Critical**: FinancingCalculator interest rate slider no longer shows 450% after first interaction — value conversion now correctly divides by 100 for both `down_payment_percentage` and `interest_rate`
+- Fixed `calculate_roi()` ZeroDivisionError when `initial_investment` (down_payment + closing_costs) is zero
+- Fixed `TopMarketsResource` limit parameter crash on non-numeric input — now validates and returns 400
+- Fixed scheduler not starting under gunicorn — `run_scheduled_tasks()` now called at module level instead of only in `if __name__ == '__main__'`
+- Removed dead code: unused `renderMetricsComparison` function and `Bar` import from Dashboard.js
+- Removed dead code: unused `data = request.get_json()` and reflected `parameters` key from MarketAnalysis POST
+- Fixed PropertyDetail crash on null `analysis.financial_analysis.monthly_cash_flow` — now uses `?? 0` fallback
+- Fixed PropertyDetail crash on `property.sqft === 0` in price-per-sqft calculation
+- Fixed `isLoading` state clobber in PropertyDetail: custom analysis recalculation now uses separate `isAnalyzing` state
+- Fixed stale error display: Dashboard and PropertyDetail now clear error state at start of each fetch
+
+### Frontend Fixes
+- FinancingCalculator now guards against `selectedOption` exceeding `options.length`
+- Dashboard clears error state before each data fetch
+
+### Testing
+- Added 15 new tests: null body handling (3), analysis param validation (2), TopMarkets validation (2), username validation (3), password validation rules (4), calculate_roi zero-investment guard (1)
+- 405 tests, all passing (up from 390)
+
+## [1.3.0] - 2026-03-03
+
+### Security Fixes
+- **Mass assignment vulnerability**: PUT `/api/properties/<id>` now whitelists updatable fields instead of using unchecked `setattr()` — prevents overwriting `_id`, `created_at`, `metrics`, `score`
+- **Query parameter injection**: GET `/api/properties` now validates all numeric filter params (`minPrice`, `maxPrice`, `minBedrooms`, etc.) and returns 400 on malformed input
+- **Pagination bounds**: `limit` clamped to [1, 100], `page` clamped to >= 1 — prevents unbounded queries and negative offsets
+- **Content-Security-Policy header**: Added `default-src 'self'; frame-ancestors 'none'` to all responses
+- **JWT token expiration**: Added configurable `JWT_ACCESS_TOKEN_EXPIRES` (default: 1 hour) — tokens no longer live indefinitely
+
+### Bug Fixes
+- Fixed deprecated `datetime.utcnow()` in `services/scheduler.py` (missed in v1.2.0)
+- Fixed stale `_CURRENT_YEAR` class-level constant in `services/analysis/risk_assessment.py` — now computed dynamically via `_current_year()` method
+- Fixed zero interest rate division-by-zero in all three financing calculators (`get_conventional_loan`, `get_fha_loan`, `get_va_loan`)
+- Fixed misleading field names in `MarketAggregator`: renamed `median_bedrooms`/`median_bathrooms` to `avg_bedrooms`/`avg_bathrooms` (they use `$avg`, not `$median`)
+- Removed leftover `numpy>=1.24` from `requirements.txt` (numpy was removed from code in v1.2.0)
+
+### Frontend Fixes
+- **Critical**: Fixed paginated response handling in Dashboard.js — was treating envelope object `{data, total, page, limit, pages}` as an array, causing runtime crashes
+- **Critical**: Fixed same issue in PropertyDetail.js for similar properties
+- Added `ErrorBoundary` component to catch unhandled render errors
+- Added 404 route for unknown paths
+- Fixed Leaflet MapView memory leak — map instance now properly cleaned up on unmount
+
+### Code Quality
+- Extracted duplicate `_is_valid_objectid()` from `routes/properties.py` and `routes/analysis.py` into shared `utils/validation.py`
+
+### Testing
+- Added 23 new tests: query param validation, pagination bounds, mass assignment prevention, security headers, ObjectId validation, validation utility
+- 390 tests, all passing (up from 367)
+
 ## [1.2.0] - 2026-03-03
 
 ### Bug Fixes

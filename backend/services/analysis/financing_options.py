@@ -15,10 +15,13 @@ class FinancingOptions:
         loan_amount = self.property.price * (1 - down_payment_percentage)
         monthly_rate = adjusted_rate / 12
         num_payments = term_years * 12
-        
+
         # Calculate monthly payment
-        monthly_payment = loan_amount * (monthly_rate * (1 + monthly_rate) ** num_payments) / ((1 + monthly_rate) ** num_payments - 1)
-        
+        if monthly_rate == 0:
+            monthly_payment = loan_amount / num_payments
+        else:
+            monthly_payment = loan_amount * (monthly_rate * (1 + monthly_rate) ** num_payments) / ((1 + monthly_rate) ** num_payments - 1)
+
         # Calculate PMI if down payment less than 20%
         monthly_pmi = 0
         if down_payment_percentage < 0.20:
@@ -57,10 +60,13 @@ class FinancingOptions:
         loan_amount = self.property.price * (1 - down_payment_percentage)
         monthly_rate = interest_rate / 12
         num_payments = term_years * 12
-        
+
         # Calculate monthly payment
-        monthly_payment = loan_amount * (monthly_rate * (1 + monthly_rate) ** num_payments) / ((1 + monthly_rate) ** num_payments - 1)
-        
+        if monthly_rate == 0:
+            monthly_payment = loan_amount / num_payments
+        else:
+            monthly_payment = loan_amount * (monthly_rate * (1 + monthly_rate) ** num_payments) / ((1 + monthly_rate) ** num_payments - 1)
+
         # FHA requires both upfront and monthly mortgage insurance
         upfront_mip = loan_amount * 0.0175  # 1.75% upfront MIP
         monthly_mip = (loan_amount * 0.0055) / 12  # 0.55% annual MIP rate
@@ -102,9 +108,12 @@ class FinancingOptions:
         
         monthly_rate = interest_rate / 12
         num_payments = term_years * 12
-        
+
         # Calculate monthly payment
-        monthly_payment = financed_amount * (monthly_rate * (1 + monthly_rate) ** num_payments) / ((1 + monthly_rate) ** num_payments - 1)
+        if monthly_rate == 0:
+            monthly_payment = financed_amount / num_payments
+        else:
+            monthly_payment = financed_amount * (monthly_rate * (1 + monthly_rate) ** num_payments) / ((1 + monthly_rate) ** num_payments - 1)
         
         # Calculate total cost over loan term
         total_cost = monthly_payment * num_payments

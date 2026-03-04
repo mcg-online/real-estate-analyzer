@@ -89,6 +89,14 @@ class FinancialMetrics:
     def calculate_roi(self, annual_cash_flow, down_payment, closing_costs, holding_period=5, appreciation_rate=0.03):
         """Calculate return on investment over a holding period"""
         initial_investment = down_payment + closing_costs
+        if initial_investment <= 0:
+            return {
+                'total_roi': 0.0,
+                'annualized_roi': 0.0,
+                'future_value': round(self.property.price * ((1 + appreciation_rate) ** holding_period), 2),
+                'total_cash_flow': round(annual_cash_flow * holding_period, 2),
+                'appreciation_profit': round(self.property.price * ((1 + appreciation_rate) ** holding_period) - self.property.price, 2)
+            }
         future_property_value = self.property.price * ((1 + appreciation_rate) ** holding_period)
         total_cash_flow = annual_cash_flow * holding_period
         appreciation_profit = future_property_value - self.property.price

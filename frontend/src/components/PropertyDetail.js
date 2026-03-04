@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import axios from 'axios';
+import api from '../services/api';
 import InvestmentMetrics from './InvestmentMetrics';
 import PropertyGallery from './PropertyGallery';
 import FinancingCalculator from './FinancingCalculator';
@@ -15,6 +15,7 @@ const PropertyDetail = () => {
   const [similarProperties, setSimilarProperties] = useState([]);
   const [activeTab, setActiveTab] = useState('overview');
   const [isLoading, setIsLoading] = useState(true);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState(null);
 
   const [customParams, setCustomParams] = useState({
@@ -32,16 +33,18 @@ const PropertyDetail = () => {
   useEffect(() => {
     const fetchPropertyData = async () => {
       setIsLoading(true);
+      setError(null);
       try {
-        const propertyRes = await axios.get(`/api/properties/${id}`);
+        const propertyRes = await api.getProperty(id);
         setProperty(propertyRes.data);
 
-        const analysisRes = await axios.get(`/api/analysis/property/${id}`);
+        const analysisRes = await api.getPropertyAnalysis(id);
         setAnalysis(analysisRes.data);
 
         try {
-          const similarRes = await axios.get(`/api/properties?limit=4`);
-          setSimilarProperties(similarRes.data.filter(p => p._id !== id).slice(0, 3));
+          const similarRes = await api.getProperties({ limit: 4 });
+          const similarList = similarRes.data.data || [];
+          setSimilarProperties(similarList.filter(p => p._id !== id).slice(0, 3));
         } catch (e) {
           setSimilarProperties([]);
         }
@@ -50,7 +53,6 @@ const PropertyDetail = () => {
       } catch (err) {
         setError('Failed to fetch property details. Please try again later.');
         setIsLoading(false);
-        console.error('Error fetching property details:', err);
       }
     };
 
@@ -63,14 +65,13 @@ const PropertyDetail = () => {
 
   const runCustomAnalysis = async () => {
     try {
-      setIsLoading(true);
-      const response = await axios.post(`/api/analysis/property/${id}`, customParams);
+      setIsAnalyzing(true);
+      const response = await api.customizeAnalysis(id, customParams);
       setAnalysis(response.data);
-      setIsLoading(false);
+      setIsAnalyzing(false);
     } catch (err) {
       setError('Failed to run custom analysis.');
-      setIsLoading(false);
-      console.error('Error running custom analysis:', err);
+      setIsAnalyzing(false);
     }
   };
 
@@ -165,7 +166,7 @@ const PropertyDetail = () => {
                   <dl className="space-y-2">
                     <div className="flex justify-between">
                       <dt className="text-gray-500">Monthly Cash Flow</dt>
-                      <dd className="font-medium">${analysis.financial_analysis.monthly_cash_flow.toLocaleString()}</dd>
+                      <dd className="font-medium">${(analysis.financial_analysis?.monthly_cash_flow ?? 0).toLocaleString()}</dd>
                     </div>
                     <div className="flex justify-between">
                       <dt className="text-gray-500">Cap Rate</dt>
@@ -198,7 +199,7 @@ const PropertyDetail = () => {
                     </div>
                     <div className="flex justify-between">
                       <dt className="text-gray-500">Price per Sq Ft</dt>
-                      <dd className="font-medium">${Math.round(property.price / property.sqft).toLocaleString()}</dd>
+                      <dd className="font-medium">${property.sqft ? Math.round(property.price / property.sqft).toLocaleString() : 'N/A'}</dd>
                     </div>
                     <div className="flex justify-between">
                       <dt className="text-gray-500">Source</dt>
@@ -207,9 +208,13 @@ const PropertyDetail = () => {
                     <div className="flex justify-between">
                       <dt className="text-gray-500">Listing URL</dt>
                       <dd>
-                        <a href={property.listing_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800">
-                          View original listing
-                        </a>
+                        {property.listing_url && /^https?:\/\//i.test(property.listing_url) ? (
+                          <a href={property.listing_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800">
+                            View original listing
+                          </a>
+                        ) : (
+                          <span className="text-gray-400">N/A</span>
+                        )}
                       </dd>
                     </div>
                   </dl>
@@ -228,6 +233,7 @@ const PropertyDetail = () => {
           {activeTab === 'financing' && (
             <div>
               <h2 className="text-xl font-semibold mb-4">Financing Options</h2>
+              {isAnalyzing && <div className="text-center py-4 text-gray-500">Recalculating...</div>}
               <FinancingCalculator
                 property={property}
                 financingOptions={analysis.financing_options}

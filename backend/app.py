@@ -13,7 +13,7 @@ import uuid
 from dotenv import load_dotenv
 import os
 
-__version__ = '1.2.0'
+__version__ = '1.4.0'
 
 from routes.properties import PropertyResource, PropertyListResource
 from routes.analysis import PropertyAnalysisResource, MarketAnalysisResource, TopMarketsResource, OpportunityScoringResource
@@ -37,6 +37,7 @@ if not jwt_secret or jwt_secret in ('your_secret_key', 'changeme', 'secret'):
     jwt_secret = os.urandom(32).hex()
 app.config['JWT_SECRET_KEY'] = jwt_secret
 app.config['SECRET_KEY'] = jwt_secret
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = int(os.getenv('JWT_EXPIRY_SECONDS', 3600))  # 1 hour default
 app.config['MONGODB_URI'] = os.getenv('DATABASE_URL')
 
 # Initialize extensions
@@ -91,6 +92,7 @@ def after_request(response):
     response.headers['X-Frame-Options'] = 'DENY'
     response.headers['X-XSS-Protection'] = '1; mode=block'
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    response.headers['Content-Security-Policy'] = "default-src 'self'; frame-ancestors 'none'"
     if not app.debug:
         response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
     return response
@@ -201,7 +203,9 @@ def shutdown_db(exception=None):
     close_db()
 
 
+# Start scheduler for both direct execution and WSGI servers (e.g., gunicorn)
+run_scheduled_tasks()
+
 if __name__ == '__main__':
     debug = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
-    run_scheduled_tasks()
     app.run(debug=debug, host='0.0.0.0', port=5000)

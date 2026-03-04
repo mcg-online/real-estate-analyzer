@@ -52,15 +52,18 @@ A comprehensive full-stack web application for analyzing residential real estate
 - **Async Data Collection**: aiohttp with backoff retry strategy
 - **Background Jobs**: APScheduler for scheduled data updates
 - **Server**: Gunicorn WSGI server (4 workers, production-ready)
-- **Testing**: pytest with 367 tests, 100% pass rate
-- **Input Validation**: ObjectId format validation on all ID-based endpoints
+- **Testing**: pytest with 405 tests, 100% pass rate
+- **Input Validation**: Parameter bounds, username validation, null body handling
+- **Security Headers**: CSP, HSTS, X-Frame-Options, X-Content-Type-Options
 
 ### Frontend
 - **Framework**: React 17 with React Router v5
 - **Styling**: Tailwind CSS with responsive design
 - **Visualization**: Chart.js (via react-chartjs-2) and Leaflet (via react-leaflet)
-- **HTTP Client**: Axios for API communication
+- **HTTP Client**: apiClient service with JWT auth and error handling
 - **Build**: Create React App with webpack bundling
+- **Error Handling**: ErrorBoundary component for render error recovery
+- **Components**: 404 route for unknown paths, Leaflet map memory leak fixes
 
 ### Deployment
 - **Containerization**: Docker with multi-stage builds
@@ -94,6 +97,7 @@ real-estate-analyzer/
 │   │   │                                   # TopMarketsResource
 │   │   │
 │   │   └── users.py                        # UserRegistration, UserLogin
+│   │                                       # Username 3-64 chars validation
 │   │                                       # UserLogout with bcrypt hashing
 │   │
 │   ├── services/
@@ -133,7 +137,7 @@ real-estate-analyzer/
 │   │   │                                   # Thread-safe, auto-reconnect
 │   │   │                                   # Exponential backoff, URI parsing
 │   │   │
-│   │   └── validators.py (optional)        # Input validation helpers
+│   │   └── validation.py                   # Shared ObjectId and input validation
 │   │
 │   ├── tests/
 │   │   ├── test_financial_metrics.py       # ROI, cap rate calculations
@@ -162,6 +166,7 @@ real-estate-analyzer/
 │   │   │   ├── PropertyCard.js             # Individual property display
 │   │   │   ├── FilterPanel.js              # Advanced filter controls
 │   │   │   ├── MapView.js                  # Leaflet map integration
+│   │   │   │                               # Memory leak fixes, proper cleanup
 │   │   │   ├── PropertyGallery.js          # Photo gallery view
 │   │   │   ├── InvestmentSummary.js        # Key metrics overview
 │   │   │   ├── InvestmentMetrics.js        # Detailed metrics table
@@ -170,11 +175,13 @@ real-estate-analyzer/
 │   │   │   ├── ComparisonTable.js          # Multi-property comparison
 │   │   │   ├── TaxBenefits.js              # Tax benefit breakdown
 │   │   │   ├── FinancingCalculator.js      # Loan option calculator
-│   │   │   └── Login.js                    # Authentication view
+│   │   │   ├── ErrorBoundary.js            # Render error recovery
+│   │   │   ├── Login.js                    # Authentication view
+│   │   │   └── NotFound.js                 # 404 route handler
 │   │   │
 │   │   ├── services/
-│   │   │   └── api.js                      # Axios API client with interceptors
-│   │   │                                   # JWT token handling, error handling
+│   │   │   └── api.js                      # apiClient for all API calls
+│   │   │                                   # JWT auth, error handling, interceptors
 │   │   │
 │   │   ├── App.css                         # Global styles
 │   │   └── index.js                        # React DOM render
@@ -445,7 +452,7 @@ python -c "from services.data_collection.data_collection_service import DataColl
 ```bash
 cd backend
 
-# Run all 367 tests with verbose output
+# Run all 405 tests with verbose output
 pytest tests/ -v
 
 # Run with coverage report
@@ -460,17 +467,18 @@ pytest tests/ -k "roi" -v
 
 ### Test Files
 
-- **test_financial_metrics.py**: ROI, cap rate, cash-on-cash, break-even calculations
+- **test_financial_metrics.py**: ROI, cap rate, cash-on-cash, break-even calculations; includes zero-investment ROI guard test
 - **test_financing_options.py**: Conventional, FHA, VA loan comparisons
 - **test_opportunity_scoring.py**: 0-100 composite scoring algorithm
 - **test_risk_assessment.py**: Risk evaluation across dimensions
-- **test_routes.py**: API endpoint testing (CRUD operations)
+- **test_routes.py**: 62 API endpoint tests (24 base + 23 v1.3.0 + 15 v1.4.0)
 - **test_tax_benefits.py**: Depreciation and tax deduction calculations
+- **test_validation.py**: 7 tests for shared validation utility (ObjectId, parameters, username)
 - **conftest.py**: pytest fixtures and MongoDB test setup
 
 ### Test Coverage
 
-The project maintains **100% test pass rate** with 367 tests covering:
+The project maintains **100% test pass rate** with 405 tests covering:
 - Financial calculation accuracy
 - API endpoint behavior
 - Authentication flows
@@ -557,15 +565,31 @@ JWT_SECRET=a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6
 ### Security Best Practices
 
 1. **Bcrypt Passwords**: All user passwords are hashed with bcrypt (12 rounds)
-2. **JWT Tokens**: Tokens expire after configurable period (default: 24 hours)
+2. **JWT Tokens**: Tokens expire after configurable period (default: 1 hour)
 3. **Rate Limiting**: API endpoints protected with configurable rate limits (default: 100 req/hour)
 4. **CORS Configuration**: Restricted to configured frontend origins
-5. **Input Validation**: All endpoints validate input to prevent injection attacks
-6. **Database Connection**: Secure MongoDB connection with authentication support
-7. **Helmet.js**: Headers secured in production
-8. **Request Logging**: All API requests logged for auditing
-9. **Environment Separation**: Dev, staging, and production have separate configs
-10. **HTTPS in Production**: Always use HTTPS for JWT token transmission
+5. **Content-Security-Policy**: CSP headers on all responses preventing XSS attacks
+6. **HTML Escaping**: Map popups use `escapeHtml()` helper to prevent DOM-based XSS
+7. **Input Validation**:
+   - ObjectId format validation on all ID-based endpoints (400 on invalid)
+   - Username: 3-64 chars, alphanumeric + `_.-` only
+   - Analysis parameters with bounds: term_years [1,40], holding_period [1,30], interest_rate [0.001,0.30]
+   - Listing URL validation: only `http://` and `https://` schemes allowed
+   - Pagination bounds: limit [1,100], page >= 1
+   - Query parameter injection prevention on numeric filters
+8. **Null Body Handling**: POST/PUT endpoints return 400 on missing or invalid JSON body
+9. **Mass Assignment Prevention**: PUT properties whitelists updatable fields only
+10. **Database Connection**: Secure MongoDB connection with authentication support
+11. **Security Headers**:
+    - Content-Security-Policy (CSP) prevents inline script execution
+    - X-Content-Type-Options: nosniff prevents MIME sniffing
+    - X-Frame-Options: DENY prevents clickjacking
+    - X-XSS-Protection: 1; mode=block for legacy browser support
+    - Referrer-Policy: strict-origin-when-cross-origin controls referrer leaking
+    - HSTS: Enforces HTTPS in production
+12. **Request Logging**: All API requests logged for auditing
+13. **Environment Separation**: Dev, staging, and production have separate configs
+14. **HTTPS in Production**: Always use HTTPS for JWT token transmission
 
 ### Deployment Security Checklist
 

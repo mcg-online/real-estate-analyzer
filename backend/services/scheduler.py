@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from services.data_collection.zillow_scraper import ZillowScraper
 from models.market import Market
 from utils.database import get_db
@@ -69,7 +69,7 @@ def update_market_data():
                 # from external sources like Census API, economic data APIs, etc.
                 
                 # For now, we'll just update the timestamp
-                market.updated_at = datetime.utcnow()
+                market.updated_at = datetime.now(timezone.utc)
                 market.save()
                 
                 logger.info(f"Updated market data for {market.name}")
