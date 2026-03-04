@@ -7,9 +7,7 @@ import MarketMetricsChart from './MarketMetricsChart';
 import MapView from './MapView';
 import FilterPanel from './FilterPanel';
 import TopMarketsTable from './TopMarketsTable';
-import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend } from 'chart.js';
-
-ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
+import '../chartSetup';
 
 const Dashboard = () => {
   const [properties, setProperties] = useState([]);

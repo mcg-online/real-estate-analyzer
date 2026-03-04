@@ -5,6 +5,41 @@ All notable changes to the Real Estate Analyzer project will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-03-04
+
+### Architecture
+- **Flask application factory pattern**: Refactored `app.py` into `create_app(config)` factory function with `config.py` module (BaseConfig, DevelopmentConfig, TestingConfig, ProductionConfig). Scheduler startup skipped when `TESTING=True`. Backward compatible: `gunicorn app:app` and all existing imports work unchanged.
+- **Request validation middleware**: Created `utils/request_validators.py` with three reusable decorators: `require_json_body`, `validate_objectid(param_name)`, `require_entity(model_class, param_name, inject_as)`. Refactored `routes/properties.py` and `routes/analysis.py` to eliminate inline validation boilerplate.
+- **Circuit breaker pattern**: Added `utils/circuit_breaker.py` with CLOSED/OPEN/HALF_OPEN states, failure threshold (5), and recovery timeout (300s). Applied to ZillowScraper HTTP calls.
+- **Async/sync consistency**: Added `_run_maybe_coroutine()` helper in scheduler for consistent handling of sync/async scraper methods.
+- **Chart.js consolidation**: Created `frontend/src/chartSetup.js` to consolidate duplicate `ChartJS.register()` calls from Dashboard.js and MarketMetricsChart.js.
+
+### New Features
+- **Cursor-based pagination**: Properties endpoint supports `?cursor=<objectid>&limit=50` for efficient large-dataset traversal alongside existing offset/limit pagination. 36 tests.
+
+### Frontend
+- **132 component tests**: 14 test suites covering Dashboard, PropertyCard, FilterPanel, ErrorBoundary, InvestmentSummary, ComparisonTable, PropertyDetail, FinancingCalculator, TopMarketsTable, MapView, MarketMetricsChart, InvestmentMetrics, TaxBenefits, PropertyGallery.
+- **Dependency fixes**: Pinned `@babel/preset-env@7.20.2`, `babel-preset-current-node-syntax@1.0.1`, `html-minifier-terser@6.1.0`, `terser@5.16.1` via npm overrides for Node.js v24 compatibility.
+
+### Testing
+- Added 175 new backend tests across 4 new test files:
+  - `test_integration.py`: 64 cross-endpoint API flow tests (user lifecycle, CRUD, ownership, search, analysis, error cascades, API versioning parity, rate limiting)
+  - `test_contracts.py`: 50 frontend-backend API contract tests verifying response shapes
+  - `test_cursor_pagination.py`: 36 cursor-based pagination tests
+  - `test_request_validators.py`: 33 decorator unit tests (require_json_body, validate_objectid, require_entity, stacking, metadata)
+- Added 132 frontend tests across 14 test suites
+- **687 backend tests + 132 frontend tests = 819 total, all passing**
+
+### Documentation
+- Created CONTRIBUTING.md with PR guidelines, commit format, branch naming
+- Created DEPLOYMENT.md with Docker, AWS, GCP, Azure deployment instructions
+- Created TROUBLESHOOTING.md with common issues and solutions
+- Created 4 Architecture Decision Records (ADRs): MongoDB selection, JWT authentication, API versioning strategy, Redis integration
+- Created load test documentation (tests/load/README.md)
+
+### Performance Testing
+- Added Locust load tests with 3 user profiles: BrowsingUser (weight=3), AuthenticatedUser (weight=2), HeavyAnalysisUser (weight=1)
+
 ## [1.5.0] - 2026-03-04
 
 ### New Features

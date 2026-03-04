@@ -1,15 +1,15 @@
 # Security Policy
 
-Real Estate Analyzer v1.5.0 - Security documentation and responsible disclosure guidelines.
+Real Estate Analyzer v1.6.0 - Security documentation and responsible disclosure guidelines.
 
 ## Supported Versions
 
 | Version | Status | Support Until |
 |---------|--------|---------------|
-| 1.5.0   | Current | Latest |
-| 1.4.0   | Supported | 6 months |
-| 1.3.0   | Security fixes only | 3 months |
-| < 1.3.0 | Unsupported | Upgrade required |
+| 1.6.0   | Current | Latest |
+| 1.5.0   | Supported | 6 months |
+| 1.4.0   | Security fixes only | 3 months |
+| < 1.4.0 | Unsupported | Upgrade required |
 
 ## Reporting a Vulnerability
 
@@ -28,7 +28,7 @@ We take security seriously. If you discover a security vulnerability, please rep
 
 **Confidentiality**: Please do not publicly disclose the vulnerability until a fix is released. We will work with you to coordinate responsible disclosure.
 
-## Security Features (v1.5.0)
+## Security Features (v1.6.0)
 
 ### Authentication & Authorization
 
@@ -53,6 +53,10 @@ We take security seriously. If you discover a security vulnerability, please rep
 
 ### Input Validation
 
+- **Centralized Validation Middleware** (v1.6.0) - Validation logic moved from inline route code to reusable decorators in `utils/request_validators.py`:
+  - `require_json_body` — validates and injects JSON body; returns 400 if missing or not a dict
+  - `validate_objectid(param)` — validates MongoDB ObjectId URL parameters; returns 400 on invalid format
+  - `require_entity(model, param, inject_as)` — combines ObjectId validation with DB lookup; returns 400/404 as appropriate
 - **ObjectId Format Validation** - All ID-based routes validate MongoDB ObjectId format, return 400 on invalid IDs
 - **Username Validation** - 3-64 characters, alphanumeric with hyphens, underscores, and dots only (`[a-zA-Z0-9_.-]`)
 - **Password Requirements** - Enforced at registration:
@@ -70,11 +74,12 @@ We take security seriously. If you discover a security vulnerability, please rep
   - `sort_by`: whitelist validation (price, created_at, score)
   - `sort_order`: must be 'asc' or 'desc'
   - `limit`, `page`: positive integers within bounds
+  - `cursor`: must be a valid MongoDB ObjectId string (cursor pagination)
   - `state`, `city`, `zip_code`: string format validation
 - **Pagination Bounds** - Enforced limits:
-  - `limit`: 1-100 (default: 10)
+  - `limit`: 1-100 (default: 50)
   - `page`: >= 1 (default: 1)
-- **Null Body Handling** - POST and PUT endpoints return 400 Bad Request on missing or invalid JSON
+- **Null Body Handling** - POST and PUT endpoints return 400 Bad Request on missing or invalid JSON (enforced via `require_json_body` decorator)
 
 ### XSS Prevention
 
@@ -109,6 +114,14 @@ X-XSS-Protection: 1; mode=block
 Referrer-Policy: strict-origin-when-cross-origin
 Strict-Transport-Security: max-age=31536000; includeSubDomains (production only)
 ```
+
+### Circuit Breaker for External Service Protection (v1.6.0)
+
+- **Implementation**: `utils/circuit_breaker.py` — three-state machine (CLOSED, OPEN, HALF_OPEN)
+- **Applied to**: ZillowScraper HTTP calls, preventing runaway requests to external services
+- **Security benefit**: Limits the blast radius of a misbehaving external dependency; prevents request pile-up that could exhaust backend resources or cause DoS-like behavior under sustained scraper failures
+- **Parameters**: `failure_threshold=5`, `recovery_timeout=300s`
+- **Behavior when OPEN**: raises `CircuitOpenError`; caller logs a warning and skips the request gracefully instead of propagating 500 errors to the API layer
 
 ### Redis-Backed Security Infrastructure
 
@@ -208,7 +221,13 @@ THREADS_PER_WORKER=4
 
 ## Security Changelog
 
-### v1.5.0 (Current)
+### v1.6.0 (Current)
+- Added centralized validation middleware (`utils/request_validators.py`): `require_json_body`, `validate_objectid`, `require_entity` decorators eliminate duplicated validation logic in routes
+- Added circuit breaker (`utils/circuit_breaker.py`) protecting ZillowScraper HTTP calls from cascading failures
+- Validation coverage extended to cursor pagination parameter (`cursor` must be valid ObjectId or absent)
+- Application factory pattern (`create_app`) improves test isolation by allowing `TestingConfig` to disable rate limiting and scheduler startup
+
+### v1.5.0
 - Added property ownership authorization with user_id capture and enforcement
 - Added Redis-backed token blocklist with in-memory fallback
 - Added Redis-backed rate limiter with graceful degradation
@@ -258,5 +277,5 @@ No known vulnerabilities have been publicly disclosed for this project. To repor
 
 ---
 
-**Last updated**: 2026-03-04
+**Last updated**: 2026-03-04 (v1.6.0)
 **Contact**: For security questions, email security@realestate-analyzer.local

@@ -132,7 +132,46 @@ class Property:
             return None
 
     @classmethod
-    def find_all(cls, filters=None, limit=100, skip=0, sort_by='price', sort_order=1):
+    def find_all(cls, filters=None, limit=100, skip=0, sort_by='price', sort_order=1,
+                 cursor=None):
+        """Fetch properties from MongoDB.
+
+        When *cursor* (an ObjectId) is provided the method switches to
+        cursor-based pagination: results are filtered to documents whose
+        ``_id`` is strictly greater than the cursor value and are always
+        sorted by ``_id`` ascending so the ordering is stable and
+        consistent with subsequent cursor advances.
+
+        When *cursor* is None the method uses traditional offset/limit
+        pagination controlled by *skip*, *sort_by*, and *sort_order*.
+        """
         db = get_db()
-        cursor = db[cls.collection_name].find(filters or {}).sort(sort_by, sort_order).skip(skip).limit(limit)
-        return [p for p in (cls.from_dict(doc) for doc in cursor) if p is not None]
+        query = dict(filters or {})
+
+        if cursor is not None:
+            # Merge the _id lower-bound into the existing query filters.
+            # If the caller already has an _id filter (unusual) we wrap both
+            # conditions in an $and clause to preserve them.
+            id_filter = {'_id': {'$gt': cursor}}
+            if '_id' in query:
+                query = {'$and': [query, id_filter]}
+            else:
+                query['_id'] = {'$gt': cursor}
+
+            # Cursor pagination requires a stable sort on _id.
+            mongo_cursor = (
+                db[cls.collection_name]
+                .find(query)
+                .sort('_id', 1)
+                .limit(limit)
+            )
+        else:
+            mongo_cursor = (
+                db[cls.collection_name]
+                .find(query)
+                .sort(sort_by, sort_order)
+                .skip(skip)
+                .limit(limit)
+            )
+
+        return [p for p in (cls.from_dict(doc) for doc in mongo_cursor) if p is not None]

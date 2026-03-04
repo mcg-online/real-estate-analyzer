@@ -39,34 +39,36 @@ A comprehensive full-stack web application for analyzing residential real estate
 - **User Registration/Login**: Bcrypt password hashing for secure credential storage
 - **Rate Limiting**: Flask-Limiter prevents abuse with configurable rate limits
 - **Request Logging**: Comprehensive logging of API requests for debugging and monitoring
+- **Circuit Breaker**: Protects external scraper calls with automatic OPEN/HALF_OPEN/CLOSED state management
 
 ## Tech Stack
 
 ### Backend
-- **Framework**: Python 3.9+, Flask 2.x, Flask-RESTful
+- **Framework**: Python 3.9+, Flask 2.x, Flask-RESTful with application factory pattern (`create_app`)
 - **Authentication**: Flask-JWT-Extended with bcrypt password hashing
 - **Database**: MongoDB (PyMongo 4.x) with connection pooling and auto-reconnect
 - **Caching**: Redis 7 for response caching and distributed rate limiting
 - **Rate Limiting**: Flask-Limiter with Redis backend for distributed rate limiting
 - **JWT Blocklist**: Redis-backed JWT token blocklist for logout functionality
 - **CORS**: Flask-CORS for cross-origin requests
-- **Async Data Collection**: aiohttp with backoff retry strategy
+- **Async Data Collection**: aiohttp with backoff retry strategy and circuit breaker protection
 - **Background Jobs**: APScheduler for scheduled data updates
 - **Server**: Gunicorn WSGI server (4 workers, production-ready)
-- **Testing**: pytest with 512 tests, 100% pass rate
-- **Input Validation**: Parameter bounds, username validation, null body handling
+- **Testing**: pytest with 687 tests, 100% pass rate
+- **Input Validation**: Centralized validation decorators (`require_json_body`, `validate_objectid`, `require_entity`), parameter bounds, username validation
 - **Security Headers**: CSP, HSTS, X-Frame-Options, X-Content-Type-Options
 
 ### Frontend
 - **Framework**: React 18 with React Router v6 and createRoot
 - **Styling**: Tailwind CSS with responsive design
-- **Visualization**: Chart.js (via react-chartjs-2) and Leaflet (direct integration)
+- **Visualization**: Chart.js (via react-chartjs-2) with consolidated `chartSetup.js` registration, and Leaflet (direct integration)
 - **HTTP Client**: apiClient service with JWT auth and error handling
 - **Build**: Create React App (react-scripts 4.0.3) with webpack bundling
 - **Dependencies**: axios 1.7, react-router-dom 6.x (installed with `npm install --legacy-peer-deps`)
 - **Error Handling**: ErrorBoundary component for render error recovery
 - **Components**: 404 route for unknown paths, Leaflet map memory leak fixes
-- **Node.js Compatibility**: Node.js v24 requires `NODE_OPTIONS=--openssl-legacy-provider`
+- **Testing**: React Testing Library with 132 tests across 14 suites, 100% pass rate
+- **Node.js Compatibility**: Node.js v24 requires `NODE_OPTIONS=--openssl-legacy-provider`; npm overrides pin `@babel/preset-env`, `terser`, `html-minifier-terser` for compatibility
 
 ### Deployment
 - **Containerization**: Docker with multi-stage builds
@@ -79,10 +81,12 @@ A comprehensive full-stack web application for analyzing residential real estate
 ```
 real-estate-analyzer/
 ├── backend/
-│   ├── app.py                              # Flask entry point with configuration
+│   ├── app.py                              # Flask entry point: create_app() factory
 │   │                                       # - JWT setup, rate limiting, caching
 │   │                                       # - Health endpoints, request logging
 │   │                                       # - APScheduler initialization
+│   ├── config.py                           # Config classes (BaseConfig, Development,
+│   │                                       # Testing, ProductionConfig)
 │   │
 │   ├── models/
 │   │   ├── property.py                     # Property model (MongoDB CRUD)
@@ -144,7 +148,14 @@ real-estate-analyzer/
 │   │   │
 │   │   ├── errors.py                       # Custom error classes and handling
 │   │   │
-│   │   └── validation.py                   # Shared ObjectId and input validation
+│   │   ├── validation.py                   # Shared ObjectId and input validation
+│   │   │
+│   │   ├── request_validators.py           # Reusable validation decorators:
+│   │   │                                   # require_json_body, validate_objectid,
+│   │   │                                   # require_entity
+│   │   │
+│   │   └── circuit_breaker.py              # Circuit breaker (CLOSED/OPEN/HALF_OPEN)
+│   │                                       # for protecting external HTTP calls
 │   │
 │   ├── tests/
 │   │   ├── test_auth.py                    # JWT auth and token validation (22 tests)
@@ -158,6 +169,12 @@ real-estate-analyzer/
 │   │   ├── test_scheduler.py               # APScheduler and background jobs (18 tests)
 │   │   ├── test_tax_benefits.py            # Tax deduction calculations
 │   │   ├── test_validation.py              # Shared validation utilities (7 tests)
+│   │   ├── test_integration.py             # Cross-endpoint API flow tests (64 tests)
+│   │   ├── test_contracts.py               # Frontend-backend API contract tests (50 tests)
+│   │   ├── test_cursor_pagination.py       # Cursor-based pagination tests (36 tests)
+│   │   ├── test_request_validators.py      # Validation decorator unit tests (33 tests)
+│   │   ├── load/
+│   │   │   └── locustfile.py               # Locust load tests (3 user profiles)
 │   │   └── conftest.py                     # pytest fixtures and setup
 │   │
 │   ├── Dockerfile                          # Multi-stage build for backend
@@ -171,6 +188,8 @@ real-estate-analyzer/
 │   ├── src/
 │   │   ├── App.js                          # React Router configuration
 │   │   │                                   # Routes: /, /property/:id, /login
+│   │   ├── chartSetup.js                   # Consolidated Chart.js register() calls
+│   │   ├── setupTests.js                   # React Testing Library setup
 │   │   │
 │   │   ├── components/
 │   │   │   ├── Dashboard.js                # Property listing with filters
@@ -219,7 +238,7 @@ real-estate-analyzer/
 
 | Method | Endpoint | Description | Auth | Query Params |
 |--------|----------|-------------|------|--------------|
-| GET | `/api/properties` | List properties with filtering & pagination | No | `minPrice`, `maxPrice`, `minBedrooms`, `minBathrooms`, `propertyType`, `city`, `state`, `zipCode`, `minScore`, `limit`, `page`, `sortBy`, `sortOrder` |
+| GET | `/api/properties` | List properties with filtering & pagination | No | `minPrice`, `maxPrice`, `minBedrooms`, `minBathrooms`, `propertyType`, `city`, `state`, `zipCode`, `minScore`, `limit`, `page`, `sortBy`, `sortOrder`, `cursor` |
 | POST | `/api/properties` | Create new property (user_id captured from JWT) | Yes | — |
 | GET | `/api/properties/<id>` | Get property by ID | No | — |
 | PUT | `/api/properties/<id>` | Update property (owner only, 403 if not owner) | Yes | — |
@@ -467,7 +486,7 @@ python -c "from services.data_collection.data_collection_service import DataColl
 ```bash
 cd backend
 
-# Run all 512 tests with verbose output
+# Run all 687 backend tests with verbose output
 pytest tests/ -v
 
 # Run with coverage report
@@ -480,8 +499,16 @@ pytest tests/test_financial_metrics.py -v
 pytest tests/ -k "roi" -v
 ```
 
+For frontend tests:
+
+```bash
+cd frontend
+npm test -- --watchAll=false
+```
+
 ### Test Files
 
+**Backend (687 tests):**
 - **test_auth.py**: JWT authentication, token validation, login/logout flows (22 tests)
 - **test_data_collection.py**: Zillow scraper, async data collection, scheduling (37 tests)
 - **test_database.py**: MongoDB model methods, CRUD operations, indexes (23 tests)
@@ -489,21 +516,33 @@ pytest tests/ -k "roi" -v
 - **test_financing_options.py**: Conventional, FHA, VA loan comparisons
 - **test_opportunity_scoring.py**: 0-100 composite scoring algorithm
 - **test_risk_assessment.py**: Risk evaluation across dimensions
-- **test_routes.py**: 69 API endpoint tests (24 base + 23 v1.3.0 + 15 v1.4.0 + 7 v1.5.0)
+- **test_routes.py**: API endpoint tests (69 tests)
 - **test_scheduler.py**: APScheduler background jobs, watchdog thread (18 tests)
 - **test_tax_benefits.py**: Depreciation and tax deduction calculations
 - **test_validation.py**: Shared validation utility (ObjectId, parameters, username)
+- **test_integration.py**: Cross-endpoint API flow tests (64 tests, v1.6.0)
+- **test_contracts.py**: Frontend-backend API contract tests (50 tests, v1.6.0)
+- **test_cursor_pagination.py**: Cursor-based pagination tests (36 tests, v1.6.0)
+- **test_request_validators.py**: Validation decorator unit tests (33 tests, v1.6.0)
+- **tests/load/locustfile.py**: Locust load tests with 3 user profiles (v1.6.0)
 - **conftest.py**: pytest fixtures and MongoDB test setup
+
+**Frontend (132 tests across 14 suites, v1.6.0):**
+- Dashboard, PropertyCard, FilterPanel, ErrorBoundary, InvestmentSummary, ComparisonTable, PropertyDetail, FinancingCalculator, TopMarketsTable, MapView, MarketMetricsChart, InvestmentMetrics, TaxBenefits, PropertyGallery
 
 ### Test Coverage
 
-The project maintains **100% test pass rate** with 512 tests covering:
+The project maintains **100% test pass rate** with 819 total tests (687 backend + 132 frontend) covering:
 - Financial calculation accuracy
 - API endpoint behavior
 - Authentication flows
 - Data persistence
 - Error handling
 - Edge cases
+- Cross-endpoint integration flows
+- Frontend-backend API contracts
+- Cursor-based pagination
+- Validation decorator behavior
 
 ## Environment Variables
 

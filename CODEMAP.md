@@ -1,6 +1,6 @@
 # Real Estate Analyzer - Code Map
 
-**Version:** 1.5.0
+**Version:** 1.6.0
 **Last Updated:** 2026-03-04
 
 This document provides a comprehensive map of the Real Estate Analyzer codebase, including all source files, their purposes, key classes/functions, and data flows. Use this as a reference for understanding system architecture and navigating the code.
@@ -41,6 +41,8 @@ The backend exposes REST endpoints for all operations. The frontend communicates
 ```
 Frontend (React 18)
     ├── App.js (Router entry point with Routes/Route v6)
+    ├── chartSetup.js (consolidated Chart.js register() calls, v1.6.0)
+    ├── setupTests.js (React Testing Library setup, v1.6.0)
     ├── services/api.js (API client with interceptors)
     ├── components/
     │   ├── Dashboard (main view)
@@ -52,7 +54,8 @@ Frontend (React 18)
     └── (React 18, react-router-dom v6, no react-leaflet dependency)
 
 Backend (Flask + MongoDB)
-    ├── app.py (Flask app, middleware, scheduler)
+    ├── app.py (create_app() factory, middleware, scheduler)
+    ├── config.py (BaseConfig, DevelopmentConfig, TestingConfig, ProductionConfig)
     ├── routes/ (REST endpoints)
     │   ├── properties.py (PropertyListResource, PropertyResource)
     │   ├── analysis.py (analysis endpoints)
@@ -69,7 +72,9 @@ Backend (Flask + MongoDB)
         ├── database.py (MongoDB connection)
         ├── auth.py (JWT blocklist)
         ├── validation.py (ObjectId validation)
-        └── errors.py (error response formatting)
+        ├── errors.py (error response formatting)
+        ├── request_validators.py (require_json_body, validate_objectid, require_entity)
+        └── circuit_breaker.py (CLOSED/OPEN/HALF_OPEN state machine)
 
 Data Flow:
   User Action → Frontend API call → Flask Route → Service Logic → MongoDB
@@ -81,13 +86,28 @@ Data Flow:
 
 ## Backend: Entry Point
 
+### File: `/backend/config.py`
+
+**Purpose:** Configuration classes for different Flask deployment environments (v1.6.0).
+
+**Classes:**
+- `BaseConfig` — shared defaults: JWT settings, CORS origins, rate limit strings, Redis URL, max content length
+- `DevelopmentConfig(BaseConfig)` — `DEBUG=True`, relaxed limits
+- `TestingConfig(BaseConfig)` — `TESTING=True`, `RATELIMIT_ENABLED=False`; scheduler startup skipped in `create_app` when this flag is set
+- `ProductionConfig(BaseConfig)` — `DEBUG=False`, enforces strong JWT secret
+
+---
+
 ### File: `/backend/app.py`
 
-**Purpose:** Flask application initialization, middleware setup, route registration, scheduler management, and health checks.
+**Purpose:** Flask application factory, middleware setup, route registration, scheduler management, and health checks.
+
+**Factory Function:**
+- `create_app(config=None)` — accepts a config object or class; defaults to `DevelopmentConfig` when run directly; `gunicorn app:app` and existing `from app import app` imports remain unchanged
 
 **Key Globals:**
-- `__version__ = '1.5.0'`
-- `app`: Flask application instance
+- `__version__ = '1.6.0'`
+- `app`: Flask application instance (module-level, created by `create_app()`)
 - `jwt`: JWTManager for token validation
 - `limiter`: Rate limiter (Redis-backed or in-memory, 200 req/day, 50 req/hour)
 - `cache`: SimpleCache for response caching
@@ -95,12 +115,6 @@ Data Flow:
 - `_scheduler_thread`: Background task thread for scheduled property/market updates
 - `_scheduler_last_heartbeat`: Timestamp of last scheduler heartbeat
 - `_scheduler_lock`: Thread lock for safe scheduler access
-
-**Configuration Updates (v1.5.0):**
-- Redis connection from `REDIS_URL` env var (optional, falls back to in-memory)
-- Rate limiter and cache use Redis if available for multi-worker deployments
-- API versioning: dual-path route registration (`/api/v1/...` and `/api/...`)
-- `redis>=5.0.0` added to requirements.txt
 
 **Routes Registered:**
 - `GET /` - Home endpoint with version info
@@ -908,7 +922,97 @@ def __init__(self)
 
 ---
 
+### File: `/backend/utils/request_validators.py`
+
+**Purpose:** Centralized request validation decorators for Flask-RESTful Resource handlers (v1.6.0).
+
+**Decorators:**
+
+- `require_json_body` - Parse and validate the JSON request body
+  - Calls `request.get_json(silent=True)`; returns 400 VALIDATION_ERROR if body is missing or not a dict
+  - Injects parsed body as keyword argument `data` into the decorated function
+
+- `validate_objectid(param_name)` - Validate a URL path parameter as a MongoDB ObjectId
+  - Factory decorator: `@validate_objectid('property_id')`
+  - Reads `kwargs[param_name]`, validates with `is_valid_objectid()`
+  - Returns 400 VALIDATION_ERROR with human-readable label (underscores replaced with spaces) on failure
+
+- `require_entity(model_class, param_name, inject_as)` - Validate ObjectId + load entity
+  - Factory decorator: `@require_entity(Property, 'property_id', inject_as='property_obj')`
+  - Step 1: ObjectId validation (400 on invalid)
+  - Step 2: `model_class.find_by_id(raw_id)` lookup (404 if not found, 500 on unexpected exception)
+  - Injects loaded entity as `kwargs[inject_as]`
+  - Subsumes `validate_objectid`; do not stack both for the same parameter
+
+**Stacking Order Note:** Python applies decorators bottom-up. The decorator closest to the function signature runs first:
+```python
+@validate_objectid('property_id')   # second
+@require_json_body                   # first (innermost)
+def put(self, property_id, data):
+    ...
+```
+
+---
+
+### File: `/backend/utils/circuit_breaker.py`
+
+**Purpose:** Thread-safe circuit breaker for protecting external HTTP calls (v1.6.0).
+
+**Classes:**
+
+- `CircuitState(Enum)` - State values: `CLOSED`, `OPEN`, `HALF_OPEN`
+
+- `CircuitOpenError(Exception)` - Raised when a call is attempted while the circuit is OPEN
+
+- `CircuitBreaker` - Main circuit breaker class
+
+**Constructor:**
+```python
+CircuitBreaker(
+    name="circuit_breaker",
+    failure_threshold=5,
+    recovery_timeout=300.0,
+    expected_exception=Exception
+)
+```
+
+**Key Methods:**
+- `state` (property) — Returns current state; automatically transitions OPEN -> HALF_OPEN when `recovery_timeout` has elapsed since opening
+- `call(func, *args, **kwargs)` — Invoke protected callable; raises `CircuitOpenError` if OPEN; records failure/success and manages state transitions
+- `reset()` — Manually reset to CLOSED state (for tests or confirmed recovery)
+
+**State Transitions:**
+- CLOSED → OPEN: `failure_count` reaches `failure_threshold`
+- OPEN → HALF_OPEN: `recovery_timeout` elapses (on next `state` access)
+- HALF_OPEN → CLOSED: probe call succeeds
+- HALF_OPEN → OPEN: probe call fails (timer resets)
+
+**Applied to:** `ZillowScraper` HTTP calls via `breaker.call(session.get, url, ...)`.
+
+---
+
 ## Frontend: Application Structure
+
+### File: `/frontend/src/chartSetup.js`
+
+**Purpose:** Consolidated Chart.js component registration (v1.6.0).
+
+**Problem solved:** `Dashboard.js` and `MarketMetricsChart.js` both called `ChartJS.register(...)` with overlapping registrations, causing duplicate-registration warnings and making it harder to manage which Chart.js components are in the bundle.
+
+**Solution:** Single `chartSetup.js` that calls `ChartJS.register(...)` once with all required components. Imported at the application entry point (`index.js`) before any chart component is rendered.
+
+**Registered components:** CategoryScale, LinearScale, BarElement, PointElement, LineElement, ArcElement, Title, Tooltip, Legend.
+
+---
+
+### File: `/frontend/src/setupTests.js`
+
+**Purpose:** Global test environment setup for React Testing Library (v1.6.0).
+
+- Imports `@testing-library/jest-dom` to extend Jest matchers with DOM assertions (`toBeInTheDocument`, `toHaveClass`, etc.)
+- Executed automatically by Create React App before each test suite
+
+---
 
 ### File: `/frontend/src/App.js`
 
@@ -1184,36 +1288,75 @@ else:  #6B7280 (gray)
 
 ## Test Coverage Map
 
-**Location:** `/backend/tests/` (512 tests total as of v1.5.0)
+**Backend Location:** `/backend/tests/` — **687 tests** (v1.6.0)
+**Frontend Location:** `/frontend/src/` — **132 tests** across 14 suites (v1.6.0)
+**Total: 819 tests, all passing**
+
+### Backend Tests
 
 | Test File | Test Count | Coverage |
 |-----------|-----------|----------|
-| `test_models.py` | 65 | Property/Market models: CRUD, validation, serialization |
-| `test_routes_properties.py` | 69 | Property endpoints: list, create, get, update (ownership check), delete (ownership check), filters, pagination |
-| `test_routes_analysis.py` | 68 | Analysis endpoints: property analysis, market analysis, scoring |
-| `test_routes_users.py` | 44 | Auth endpoints: registration, login, logout, validation, rate limiting |
-| `test_services.py` | 65 | Financial, tax, financing, risk, opportunity scoring services |
-| `test_geographic.py` | 28 | Market aggregator: state/city/zip aggregations, top markets |
-| `test_utilities.py` | 25 | Database, validation, error responses, auth blocklist |
-| `test_auth.py` (NEW) | 22 | JWT blocklist: Redis-backed + in-memory fallback, token revocation |
-| `test_data_collection.py` (NEW) | 37 | ZillowScraper, DataCollectionService, property extraction |
-| `test_database.py` (NEW) | 23 | MongoDB connection, auto-reconnect, health checks |
-| `test_scheduler.py` (NEW) | 18 | Scheduled tasks: update_property_data, update_market_data |
+| `test_routes.py` | 69 | Property, analysis, auth API endpoints |
+| `test_financial_metrics.py` | ~71 | ROI, cap rate, cash-on-cash, break-even |
+| `test_financing_options.py` | ~72 | Conventional, FHA, VA loan calculations |
+| `test_opportunity_scoring.py` | ~58 | 0-100 composite scoring algorithm |
+| `test_risk_assessment.py` | ~84 | Market volatility, vacancy, condition, financing risk |
+| `test_tax_benefits.py` | ~53 | Depreciation, mortgage interest, property tax deductions |
+| `test_validation.py` | 7 | ObjectId, parameter, username validation utilities |
+| `test_auth.py` | 22 | JWT blocklist: Redis-backed + in-memory fallback, token revocation |
+| `test_data_collection.py` | 37 | ZillowScraper, DataCollectionService, property extraction |
+| `test_database.py` | 23 | MongoDB connection, auto-reconnect, health checks |
+| `test_scheduler.py` | 18 | Scheduled tasks: update_property_data, update_market_data |
+| `test_integration.py` (v1.6.0) | 64 | Cross-endpoint flows: user lifecycle, CRUD, ownership, search, analysis, error cascades, versioning parity, rate limiting |
+| `test_contracts.py` (v1.6.0) | 50 | Frontend-backend API contract tests: response shapes, required fields, types |
+| `test_cursor_pagination.py` (v1.6.0) | 36 | Cursor-based pagination: first page, next_cursor, has_more, empty results, invalid cursor |
+| `test_request_validators.py` (v1.6.0) | 33 | require_json_body, validate_objectid, require_entity decorators; stacking; functools.wraps metadata |
 
-**Test Strategy:**
-- All tests fully mocked (no MongoDB required)
-- Uses MagicMock for database operations
+### Frontend Tests (v1.6.0)
+
+| Test Suite | Coverage |
+|-----------|---------|
+| Dashboard | Filter interaction, property loading, error state, pagination |
+| PropertyCard | Rendering, score badge, price formatting, link navigation |
+| FilterPanel | Input changes, ARIA attributes, filter reset |
+| ErrorBoundary | Error catching, fallback UI, refresh button |
+| InvestmentSummary | Metrics display, null safety |
+| ComparisonTable | Multi-property comparison rendering |
+| PropertyDetail | Tab switching, custom analysis params, null financial data |
+| FinancingCalculator | Slider debounce, loan type tabs, monthly summary |
+| TopMarketsTable | Ranking display, metric formatting |
+| MapView | Marker rendering, popup content, cleanup on unmount |
+| MarketMetricsChart | Chart rendering, data shape handling |
+| InvestmentMetrics | Metrics table, percentage formatting |
+| TaxBenefits | Deduction breakdown, tax savings display |
+| PropertyGallery | Image carousel, fallback for missing images |
+
+### Load Tests
+
+**Location:** `/backend/tests/load/locustfile.py`
+
+Three user profiles for simulating realistic traffic mix:
+- `BrowsingUser` (weight=3) — property list, filter, detail page browsing
+- `AuthenticatedUser` (weight=2) — register, login, create/update/delete own properties
+- `HeavyAnalysisUser` (weight=1) — repeated custom analysis with varying financial params
+
+### Test Strategy
+- All backend tests fully mocked (no MongoDB or Redis required)
+- MagicMock for database operations; patch at import site (routes.properties.get_db)
 - 100% isolated from external dependencies
 - Pytest framework with fixtures and parametrization
-- Tests run in < 5 seconds
+- Backend tests run in < 5 seconds
+- Frontend tests use React Testing Library with jsdom
 
 **Critical Coverage:**
 - Validation rules (required fields, numeric ranges, enums)
 - Error handling (404s, 400s, 500s)
 - JWT authentication and rate limiting
 - Financial calculations (guards for division-by-zero)
-- Response format (paginated envelope, error structure)
+- Response format (paginated envelope, cursor envelope, error structure)
 - ObjectId validation and handling
+- Circuit breaker state transitions
+- Validation decorator stacking
 
 ---
 
@@ -1531,7 +1674,12 @@ FLASK_DEBUG=false
 
 ### Flask Configuration
 
-**Security (v1.5.0):**
+**Application Factory (v1.6.0):**
+- `create_app(config)` accepts a config class or instance
+- Config classes in `config.py`: `BaseConfig`, `DevelopmentConfig`, `TestingConfig`, `ProductionConfig`
+- Scheduler startup skipped when `config.TESTING` is True
+
+**Security:**
 - `MAX_CONTENT_LENGTH`: 16MB (max request body)
 - `JWT_SECRET_KEY`: From JWT_SECRET env var
 - Rate limiting: 200 req/day, 50 req/hour (per IP, Redis-backed if available)
@@ -1568,7 +1716,7 @@ FLASK_DEBUG=false
 
 ---
 
-## Docker & Infrastructure (v1.5.0)
+## Docker & Infrastructure
 
 **Services in docker-compose.yml:**
 
@@ -1606,62 +1754,74 @@ FLASK_DEBUG: false
 ```
 real-estate-analyzer/
 ├── backend/
-│   ├── app.py (Flask entry point, 212 lines)
+│   ├── app.py (create_app() factory, v1.6.0)
+│   ├── config.py (BaseConfig, DevelopmentConfig, TestingConfig, ProductionConfig, v1.6.0)
 │   ├── requirements.txt
 │   ├── models/
-│   │   ├── property.py (136 lines)
-│   │   └── market.py (160 lines)
+│   │   ├── property.py
+│   │   └── market.py
 │   ├── routes/
-│   │   ├── properties.py (333 lines)
-│   │   ├── analysis.py (273 lines)
-│   │   └── users.py (152 lines)
+│   │   ├── properties.py (cursor pagination added v1.6.0)
+│   │   ├── analysis.py
+│   │   └── users.py
 │   ├── services/
 │   │   ├── analysis/
-│   │   │   ├── financial_metrics.py (206 lines)
-│   │   │   ├── opportunity_scoring.py (618 lines)
-│   │   │   ├── risk_assessment.py (683 lines)
-│   │   │   ├── tax_benefits.py (110 lines)
-│   │   │   └── financing_options.py (190 lines)
+│   │   │   ├── financial_metrics.py
+│   │   │   ├── opportunity_scoring.py
+│   │   │   ├── risk_assessment.py
+│   │   │   ├── tax_benefits.py
+│   │   │   └── financing_options.py
 │   │   ├── geographic/
-│   │   │   └── market_aggregator.py (160 lines)
+│   │   │   └── market_aggregator.py
 │   │   ├── data_collection/
-│   │   │   ├── zillow_scraper.py (121 lines)
-│   │   │   └── data_collection_service.py (120 lines)
-│   │   └── scheduler.py (85 lines)
+│   │   │   ├── zillow_scraper.py (circuit breaker applied v1.6.0)
+│   │   │   └── data_collection_service.py
+│   │   └── scheduler.py (_run_maybe_coroutine helper v1.6.0)
 │   ├── utils/
-│   │   ├── database.py (106 lines)
-│   │   ├── auth.py (12 lines)
-│   │   ├── validation.py (12 lines)
-│   │   └── errors.py (3 lines)
+│   │   ├── database.py
+│   │   ├── auth.py
+│   │   ├── validation.py
+│   │   ├── errors.py
+│   │   ├── request_validators.py (NEW v1.6.0)
+│   │   └── circuit_breaker.py (NEW v1.6.0)
 │   └── tests/
-│       ├── test_models.py (65 tests)
-│       ├── test_routes_properties.py (69 tests) - includes ownership checks v1.5.0
-│       ├── test_routes_analysis.py (68 tests)
-│       ├── test_routes_users.py (44 tests)
-│       ├── test_services.py (65 tests)
-│       ├── test_geographic.py (28 tests)
-│       ├── test_utilities.py (25 tests)
-│       ├── test_auth.py (22 tests, NEW v1.5.0) - JWT blocklist Redis + in-memory
-│       ├── test_data_collection.py (37 tests, NEW v1.5.0) - ZillowScraper, DataCollectionService
-│       ├── test_database.py (23 tests, NEW v1.5.0) - MongoDB connection management
-│       └── test_scheduler.py (18 tests, NEW v1.5.0) - Scheduled tasks
+│       ├── test_routes.py (69 tests)
+│       ├── test_financial_metrics.py
+│       ├── test_financing_options.py
+│       ├── test_opportunity_scoring.py
+│       ├── test_risk_assessment.py
+│       ├── test_tax_benefits.py
+│       ├── test_validation.py (7 tests)
+│       ├── test_auth.py (22 tests, v1.5.0)
+│       ├── test_data_collection.py (37 tests, v1.5.0)
+│       ├── test_database.py (23 tests, v1.5.0)
+│       ├── test_scheduler.py (18 tests, v1.5.0)
+│       ├── test_integration.py (64 tests, NEW v1.6.0)
+│       ├── test_contracts.py (50 tests, NEW v1.6.0)
+│       ├── test_cursor_pagination.py (36 tests, NEW v1.6.0)
+│       ├── test_request_validators.py (33 tests, NEW v1.6.0)
+│       ├── load/
+│       │   └── locustfile.py (Locust load tests, NEW v1.6.0)
+│       └── conftest.py
 │
 ├── frontend/
 │   ├── public/
 │   │   └── index.html
 │   ├── src/
-│   │   ├── index.js (React 18 createRoot API, v1.5.0)
+│   │   ├── index.js (React 18 createRoot API)
 │   │   ├── index.css (Tailwind)
-│   │   ├── App.js (React Router v6 Routes/element, 116 lines)
+│   │   ├── App.js (React Router v6 Routes/element)
+│   │   ├── chartSetup.js (consolidated Chart.js register(), NEW v1.6.0)
+│   │   ├── setupTests.js (React Testing Library setup, NEW v1.6.0)
 │   │   ├── services/
-│   │   │   └── api.js (Base URL: /api/v1, 58 lines)
+│   │   │   └── api.js (Base URL: /api/v1)
 │   │   └── components/
-│   │       ├── Dashboard.js (passes resultsCount to FilterPanel, 183 lines)
-│   │       ├── PropertyDetail.js (339 lines)
-│   │       ├── MapView.js (120 lines)
-│   │       ├── FinancingCalculator.js (useDebounce hook, 235 lines, v1.5.0)
-│   │       ├── FilterPanel.js (ARIA accessibility, v1.5.0)
-│   │       ├── ErrorBoundary.js (42 lines)
+│   │       ├── Dashboard.js
+│   │       ├── PropertyDetail.js
+│   │       ├── MapView.js
+│   │       ├── FinancingCalculator.js (useDebounce hook)
+│   │       ├── FilterPanel.js (ARIA accessibility)
+│   │       ├── ErrorBoundary.js
 │   │       ├── PropertyCard.js
 │   │       ├── InvestmentSummary.js
 │   │       ├── MarketMetricsChart.js
@@ -1670,8 +1830,19 @@ real-estate-analyzer/
 │   │       ├── TaxBenefits.js
 │   │       ├── TopMarketsTable.js
 │   │       └── ComparisonTable.js
-│   └── package.json (React 18, react-router-dom 6, axios 1.7, @testing-library/react 14, v1.5.0)
+│   └── package.json (React 18, react-router-dom 6, axios 1.7, @testing-library/react 14, npm overrides for Node v24)
 │
+├── docs/
+│   └── adr/
+│       ├── README.md
+│       ├── 001-mongodb-as-primary-database.md
+│       ├── 002-jwt-authentication.md
+│       ├── 003-api-versioning-strategy.md
+│       └── 004-redis-integration.md
+│
+├── CONTRIBUTING.md (NEW v1.6.0)
+├── DEPLOYMENT.md (NEW v1.6.0)
+├── TROUBLESHOOTING.md (NEW v1.6.0)
 ├── docker-compose.yml
 ├── Dockerfile
 ├── CHANGELOG.md
@@ -1686,13 +1857,23 @@ real-estate-analyzer/
 
 ## Quick Reference: Key Decision Points
 
-**When working with Property objects (v1.5.0):**
+**When working with Property objects:**
 - Set `user_id` on POST: `user_id = get_jwt_identity()` (current username)
 - Check ownership on PUT/DELETE: return 403 if `property.user_id != current_user`
 - Backward-compatible: properties without user_id can still be updated (created before v1.5.0)
 - Always convert to dict before passing to analysis services: `property.to_dict()`
 - Preserve ObjectId as ObjectId in from_dict() (don't stringify)
 - Use .get() with defaults in from_dict() for defensive parsing
+
+**When adding a new route handler (v1.6.0):**
+- Use `@validate_objectid('param_name')` instead of inline is_valid_objectid() check
+- Use `@require_json_body` on POST/PUT instead of `request.get_json(silent=True)` + null check
+- Use `@require_entity(Model, 'param_name', inject_as='obj')` to combine ObjectId validation + DB lookup
+- Stack decorators bottom-up (innermost runs first)
+
+**When calling external services:**
+- Wrap HTTP calls through a `CircuitBreaker` instance: `breaker.call(session.get, url, ...)`
+- Catch `CircuitOpenError` and skip gracefully rather than propagating as a 500
 
 **When writing financial calculations:**
 - Add division-by-zero guards: `if price <= 0: return 0.0`
@@ -1724,7 +1905,7 @@ real-estate-analyzer/
 - Indexes are created on startup automatically
 - Connection auto-reconnects on failure
 
-**For API versioning (v1.5.0):**
+**For API versioning:**
 - Routes registered at both `/api/v1/...` and `/api/...` paths
 - Frontend api.js base URL: `/api/v1` (with fallback to `/api`)
 - Dual registration enables gradual migration

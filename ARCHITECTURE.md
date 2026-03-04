@@ -29,12 +29,22 @@ This architecture enables users to browse properties, analyze investment metrics
 
 ## Backend Architecture
 
-### Entry Point: app.py
+### Entry Point: app.py and config.py
 
-The Flask application initializes and coordinates all backend services.
+The Flask application uses an application factory pattern for testability and environment-based configuration.
+
+**Flask Factory Pattern (v1.6.0):**
+- `create_app(config)` factory function in `app.py` accepts a config object
+- `config.py` defines four config classes:
+  - `BaseConfig` — shared defaults (JWT, CORS, rate limiting settings)
+  - `DevelopmentConfig` — debug mode, relaxed limits
+  - `TestingConfig` — `TESTING=True`, scheduler startup skipped
+  - `ProductionConfig` — strict secrets, no debug
+- Backward compatible: `gunicorn app:app` and all existing imports unchanged
+- Scheduler startup skipped automatically when `TESTING=True`
 
 **Features:**
-- Flask application factory pattern
+- Flask application factory pattern (`create_app`)
 - JWT authentication (Flask-JWT-Extended)
 - CORS support for frontend communication
 - Rate limiting (200 requests/day, 50 requests/hour per IP)
@@ -76,17 +86,18 @@ The Flask application initializes and coordinates all backend services.
 - `GET /properties` - List all properties with filtering, pagination, sorting (paginated envelope response)
   - Query parameter validation: all numeric filters validated (returns 400 on malformed input)
   - Pagination bounds: limit clamped [1,100], page clamped >= 1
+  - Cursor-based pagination: `?cursor=<objectid>&limit=50` returns `{data, next_cursor, has_more, limit}` for efficient traversal of large datasets (v1.6.0)
 - `GET /properties/<id>` - Retrieve single property details
 - `POST /properties` - Create new property listing with ownership tracking
   - Captures `user_id` from JWT identity (identifies property owner)
-  - Null/invalid body handling: returns 400 on missing or invalid JSON
+  - Null/invalid body handling via `require_json_body` decorator (returns 400)
 - `PUT /properties/<id>` - Update property information with ownership enforcement
-  - Null/invalid body handling: returns 400 on missing or invalid JSON
+  - Null/invalid body handling via `require_json_body` decorator (returns 400)
   - Mass assignment prevention: whitelists updatable fields (address, city, state, zip_code, price, bedrooms, bathrooms, sqft, year_built, property_type, lot_size, listing_url, description, images, latitude, longitude)
   - Ownership enforcement: returns 403 if `user_id` mismatch (backward-compatible for legacy properties without user_id)
 - `DELETE /properties/<id>` - Remove property from system
   - Ownership enforcement: returns 403 if user is not the property owner (backward-compatible for legacy properties)
-- ObjectId format validation on all ID-based endpoints (returns 400 on invalid IDs)
+- ObjectId format validation via `validate_objectid` decorator on all ID-based endpoints (returns 400 on invalid IDs)
 - Property ownership model enables per-user property management while maintaining backward compatibility
 
 **analysis.py - Investment Analysis**
@@ -207,6 +218,24 @@ Analysis services accept (property_obj, market_dict) pairs and return computed r
 
 ### Utils Layer (utils/)
 
+**request_validators.py - Validation Middleware (v1.6.0)**
+- Reusable decorators that eliminate inline validation boilerplate from route handlers:
+  - `require_json_body` — parses and validates the JSON request body; injects `data` dict into the handler; returns 400 on missing or non-dict body
+  - `validate_objectid(param_name)` — validates a URL path parameter as a 24-character hex MongoDB ObjectId; returns 400 with a human-readable label on failure
+  - `require_entity(model_class, param_name, inject_as)` — combines ObjectId validation with a `find_by_id` database lookup; injects the loaded entity under `inject_as`; returns 400 on invalid ID or 404 if not found
+- Compatible with Flask-RESTful `Resource` methods; stacking order follows standard Python decorator semantics (bottom-up)
+- `require_entity` subsumes `validate_objectid`; do not stack both for the same parameter
+
+**circuit_breaker.py - Circuit Breaker Pattern (v1.6.0)**
+- Protects external HTTP calls (primarily ZillowScraper) from cascading failures
+- Three-state machine:
+  - `CLOSED` — normal operation; failures tracked against threshold
+  - `OPEN` — requests immediately rejected; downstream service given recovery time
+  - `HALF_OPEN` — single probe request allowed; success closes circuit, failure re-opens it
+- Default parameters: `failure_threshold=5`, `recovery_timeout=300` seconds
+- Thread-safe; `reset()` method available for tests or manual recovery
+- Raises `CircuitOpenError` when OPEN; callers catch and skip the request gracefully
+
 **auth.py - JWT Token Blocklist**
 - Redis-backed token blocklist with lazy initialization and in-memory fallback
 - `add_token_to_blocklist(jti)` - Revoke a JWT by its JTI claim
@@ -244,9 +273,9 @@ Analysis services accept (property_obj, market_dict) pairs and return computed r
 - **Routing**: React Router v6 (Routes/element API)
 - **HTTP Client**: Centralized apiClient (services/api.js) with JWT interceptors — all components use this instead of raw axios
 - **Styling**: Tailwind CSS
-- **Charts**: Chart.js via react-chartjs-2
+- **Charts**: Chart.js via react-chartjs-2; consolidated registration in `src/chartSetup.js` (v1.6.0) eliminates duplicate `ChartJS.register()` calls
 - **Maps**: Interactive Leaflet maps (raw Leaflet.js, not react-leaflet wrapper)
-- **Testing**: React Testing Library (devDependencies)
+- **Testing**: React Testing Library — 132 tests across 14 suites (v1.6.0); `src/setupTests.js` configures the test environment
 
 ### Routes
 - `/` - Dashboard (property overview and search)
@@ -505,12 +534,13 @@ Analysis services accept (property_obj, market_dict) pairs and return computed r
 ## Testing
 
 ### Test Coverage
-- Comprehensive pytest suite with 512 tests across 12 test files
-- Test files: test_models.py, test_auth.py, test_properties.py, test_analysis.py, test_market_analysis.py, test_market_aggregator.py, test_financial_metrics.py, test_opportunity_scoring.py, test_risk_assessment.py, test_tax_benefits.py, test_financing_options.py, test_integration.py
-- 4 new test files added in v1.5.0 for ownership enforcement and Redis integration testing
-- All tests run without MongoDB (fully mocked with MagicMock)
-- No external dependencies required to run test suite
-- Frontend testing via React Testing Library (component unit tests)
+- **687 backend tests** across 15 test files (pytest); **132 frontend tests** across 14 suites (React Testing Library) — **819 total, all passing**
+- Backend test files: test_routes.py, test_financial_metrics.py, test_financing_options.py, test_opportunity_scoring.py, test_risk_assessment.py, test_tax_benefits.py, test_validation.py, test_auth.py, test_data_collection.py, test_database.py, test_scheduler.py, test_integration.py, test_contracts.py, test_cursor_pagination.py, test_request_validators.py
+- v1.6.0 additions: test_integration.py (64 cross-endpoint flows), test_contracts.py (50 API contract tests), test_cursor_pagination.py (36 cursor pagination tests), test_request_validators.py (33 decorator unit tests)
+- v1.5.0 additions: test_auth.py, test_data_collection.py, test_database.py, test_scheduler.py
+- All backend tests run without MongoDB (fully mocked with MagicMock)
+- No external dependencies required to run backend test suite
+- Load tests: Locust `tests/load/locustfile.py` with 3 user profiles (BrowsingUser, AuthenticatedUser, HeavyAnalysisUser)
 
 ### Test Patterns
 - JWT authentication mocked in protected route tests
@@ -531,7 +561,7 @@ Analysis services accept (property_obj, market_dict) pairs and return computed r
 - CORS allowed origins
 
 ### Configuration Files
-- Flask app configuration
-- React environment files
+- `backend/config.py` — Flask config classes (BaseConfig, DevelopmentConfig, TestingConfig, ProductionConfig)
+- React environment files (`.env.local`, `.env.example`)
 - Docker Compose configuration
 - Database connection parameters

@@ -32,7 +32,7 @@ The home endpoint (`GET /`) now returns available API versions:
 ```json
 {
   "message": "Real Estate Investment Analysis API",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "api_versions": ["v1"],
   "current_api": "/api/v1"
 }
@@ -135,7 +135,7 @@ Deep readiness check that verifies critical dependencies. This checks MongoDB co
       "status": "ok"
     }
   },
-  "version": "1.5.0"
+  "version": "1.6.0"
 }
 ```
 
@@ -153,7 +153,7 @@ Deep readiness check that verifies critical dependencies. This checks MongoDB co
       "detail": "No heartbeat for 720s"
     }
   },
-  "version": "1.5.0"
+  "version": "1.6.0"
 }
 ```
 
@@ -197,22 +197,52 @@ List properties with support for filtering, pagination, and sorting.
 | `zipCode` | string | - | Filter by zip code |
 | `minScore` | float | - | Minimum investment opportunity score (0-100) |
 | `limit` | integer | 50 | Number of results per page (max 100) |
-| `page` | integer | 1 | Page number for pagination |
+| `page` | integer | 1 | Page number for offset pagination |
 | `sortBy` | string | "price" | Field to sort by (e.g., "price", "bedrooms", "score") |
 | `sortOrder` | string | "asc" | Sort direction: "asc" for ascending, "desc" for descending |
+| `cursor` | string | - | ObjectId of the last item from the previous page (cursor pagination) |
+
+**Pagination Modes:**
+
+The endpoint supports two pagination modes. Use one at a time; `cursor` takes precedence when present.
+
+**Offset pagination** (default): Use `page` and `limit`.
+
+**Cursor-based pagination** (v1.6.0): Use `cursor` and `limit` for efficient traversal of large result sets without the performance penalty of SKIP-based queries.
+
+```bash
+# First page (no cursor)
+curl "http://localhost:5000/api/v1/properties?limit=50"
+
+# Subsequent page (pass next_cursor from previous response)
+curl "http://localhost:5000/api/v1/properties?cursor=507f1f77bcf86cd799439011&limit=50"
+```
+
+**Cursor response envelope:**
+```json
+{
+  "data": [...],
+  "next_cursor": "507f1f77bcf86cd799439099",
+  "has_more": true,
+  "limit": 50
+}
+```
+
+When `has_more` is `false`, `next_cursor` is `null` and you have reached the last page.
 
 **Validation:**
 - All numeric filter parameters (`minPrice`, `maxPrice`, `minBedrooms`, `minBathrooms`, `minScore`) are validated. Non-numeric values return 400.
 - Pagination: `limit` is clamped to [1, 100], `page` is clamped to >= 1.
+- `cursor` must be a valid MongoDB ObjectId string; invalid values return 400.
 
-**Example Request:**
+**Example Request (offset pagination):**
 
 ```bash
 curl -X GET "http://localhost:5000/api/v1/properties?minPrice=200000&maxPrice=500000&state=CA&limit=20&page=1" \
   -H "Authorization: Bearer your_access_token"
 ```
 
-**Response (200 OK):**
+**Response (200 OK — offset pagination):**
 ```json
 {
   "data": [
@@ -1329,6 +1359,6 @@ For API issues, questions, or feature requests:
 
 ---
 
-**API Version:** 1.5.0
+**API Version:** 1.6.0
 **Last Updated:** 2026-03-04
 **Documentation Status:** Current

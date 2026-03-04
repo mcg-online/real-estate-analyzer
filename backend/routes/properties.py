@@ -5,8 +5,8 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from models.property import Property
 from utils.database import get_db
 from utils.errors import error_response
+from utils.request_validators import require_json_body, require_entity
 from bson import ObjectId
-from utils.validation import is_valid_objectid as _is_valid_objectid
 import logging
 
 logger = logging.getLogger(__name__)
@@ -99,9 +99,23 @@ def validate_property_data(data, require_all=True):
 
 class PropertyListResource(Resource):
     def get(self):
-        """Get list of properties with filtering options"""
+        """Get list of properties with filtering options.
+
+        Supports two mutually exclusive pagination modes:
+
+        **Offset/limit pagination** (default, backward-compatible):
+            ?page=1&limit=50
+            Response: {data, total, page, limit, pages}
+
+        **Cursor-based pagination** (opt-in via ``cursor`` query param):
+            ?cursor=<objectid>&limit=50
+            The cursor must be the ``_id`` value of the last item returned
+            by the previous page.  Pass an empty string or omit the
+            parameter entirely for the first page.
+            Response: {data, next_cursor, has_more, limit}
+        """
         try:
-            # Parse and validate query parameters
+            # Parse and validate common filter query parameters
             filters = {}
             try:
                 price_min = request.args.get('minPrice')
@@ -145,9 +159,65 @@ class PropertyListResource(Resource):
             if zip_code:
                 filters['zip_code'] = zip_code
 
-            # Pagination with bounds validation
+            # Validate and clamp the limit parameter (shared by both modes).
             try:
                 limit = max(1, min(100, int(request.args.get('limit', 50))))
+            except (ValueError, TypeError):
+                return error_response(
+                    'Invalid pagination parameter', 'VALIDATION_ERROR', 400
+                )
+
+            # ------------------------------------------------------------------
+            # Cursor-based pagination branch
+            # ------------------------------------------------------------------
+            cursor_param = request.args.get('cursor')
+            if cursor_param is not None:
+                # An empty string means "first page" — no lower bound needed.
+                cursor_oid = None
+                if cursor_param != '':
+                    from utils.validation import is_valid_objectid as _is_valid_objectid
+                    if not _is_valid_objectid(cursor_param):
+                        return error_response(
+                            'Invalid cursor format: must be a valid ObjectId string',
+                            'VALIDATION_ERROR',
+                            400,
+                        )
+                    cursor_oid = ObjectId(cursor_param)
+
+                properties = Property.find_all(
+                    filters=filters,
+                    limit=limit,
+                    cursor=cursor_oid,
+                )
+
+                # Serialize and capture the _id of each result for next_cursor.
+                properties_json = []
+                last_id = None
+                for prop in properties:
+                    prop_dict = prop.to_dict()
+                    raw_id = getattr(prop, '_id', None)
+                    if raw_id is not None:
+                        str_id = str(raw_id)
+                        prop_dict['_id'] = str_id
+                        last_id = str_id
+                    elif '_id' in prop_dict and isinstance(prop_dict['_id'], ObjectId):
+                        str_id = str(prop_dict['_id'])
+                        prop_dict['_id'] = str_id
+                        last_id = str_id
+                    properties_json.append(prop_dict)
+
+                has_more = len(properties_json) == limit
+                return {
+                    'data': properties_json,
+                    'next_cursor': last_id if has_more else None,
+                    'has_more': has_more,
+                    'limit': limit,
+                }, 200
+
+            # ------------------------------------------------------------------
+            # Offset/limit pagination branch (original, backward-compatible)
+            # ------------------------------------------------------------------
+            try:
                 page = max(1, int(request.args.get('page', 1)))
             except (ValueError, TypeError):
                 return error_response(
@@ -191,13 +261,10 @@ class PropertyListResource(Resource):
             return error_response(str(e), 'INTERNAL_ERROR', 500)
 
     @jwt_required()
-    def post(self):
+    @require_json_body
+    def post(self, data):
         """Create a new property"""
         try:
-            data = request.get_json(silent=True)
-            if not data or not isinstance(data, dict):
-                return error_response('Request body must be JSON', 'VALIDATION_ERROR', 400)
-
             # Validate required fields presence
             required_fields = ['address', 'price', 'bedrooms', 'bathrooms', 'sqft',
                              'year_built', 'property_type', 'lot_size', 'listing_url', 'source']
@@ -249,17 +316,12 @@ class PropertyListResource(Resource):
 
 
 class PropertyResource(Resource):
-    def get(self, property_id):
+    @require_entity(Property, 'property_id', inject_as='property_obj')
+    def get(self, property_id, property_obj):
         """Get a single property by ID"""
         try:
-            if not _is_valid_objectid(property_id):
-                return error_response('Invalid property ID format', 'VALIDATION_ERROR', 400)
-            property = Property.find_by_id(property_id)
-            if not property:
-                return error_response('Property not found', 'NOT_FOUND', 404)
-
             # Convert to JSON
-            result = property.to_dict()
+            result = property_obj.to_dict()
             if '_id' in result and isinstance(result['_id'], ObjectId):
                 result['_id'] = str(result['_id'])
 
@@ -270,24 +332,16 @@ class PropertyResource(Resource):
             return error_response(str(e), 'INTERNAL_ERROR', 500)
 
     @jwt_required()
-    def put(self, property_id):
+    @require_entity(Property, 'property_id', inject_as='property_obj')
+    @require_json_body
+    def put(self, property_id, property_obj, data):
         """Update a property"""
         try:
-            if not _is_valid_objectid(property_id):
-                return error_response('Invalid property ID format', 'VALIDATION_ERROR', 400)
-            property = Property.find_by_id(property_id)
-            if not property:
-                return error_response('Property not found', 'NOT_FOUND', 404)
-
             # Ownership check: only the creator may update (legacy properties with no
             # user_id are allowed through for backward compatibility)
-            property_owner = getattr(property, 'user_id', None)
+            property_owner = getattr(property_obj, 'user_id', None)
             if property_owner is not None and property_owner != get_jwt_identity():
                 return error_response('You do not own this property', 'FORBIDDEN', 403)
-
-            data = request.get_json(silent=True)
-            if not data or not isinstance(data, dict):
-                return error_response('Request body must be JSON', 'VALIDATION_ERROR', 400)
 
             # Validate only the fields being updated
             is_valid, error_msg = validate_property_data(data, require_all=False)
@@ -303,13 +357,13 @@ class PropertyResource(Resource):
             }
             for key, value in data.items():
                 if key in UPDATABLE_FIELDS:
-                    setattr(property, key, value)
+                    setattr(property_obj, key, value)
 
             # Save changes
-            property.save()
+            property_obj.save()
 
             # Return updated property
-            result = property.to_dict()
+            result = property_obj.to_dict()
             if '_id' in result and isinstance(result['_id'], ObjectId):
                 result['_id'] = str(result['_id'])
 
@@ -320,18 +374,13 @@ class PropertyResource(Resource):
             return error_response(str(e), 'INTERNAL_ERROR', 500)
 
     @jwt_required()
-    def delete(self, property_id):
+    @require_entity(Property, 'property_id', inject_as='property_obj')
+    def delete(self, property_id, property_obj):
         """Delete a property"""
         try:
-            if not _is_valid_objectid(property_id):
-                return error_response('Invalid property ID format', 'VALIDATION_ERROR', 400)
-            property = Property.find_by_id(property_id)
-            if not property:
-                return error_response('Property not found', 'NOT_FOUND', 404)
-
             # Ownership check: only the creator may delete (legacy properties with no
             # user_id are allowed through for backward compatibility)
-            property_owner = getattr(property, 'user_id', None)
+            property_owner = getattr(property_obj, 'user_id', None)
             if property_owner is not None and property_owner != get_jwt_identity():
                 return error_response('You do not own this property', 'FORBIDDEN', 403)
 

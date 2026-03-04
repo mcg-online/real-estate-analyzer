@@ -132,7 +132,7 @@ real-estate-analyzer/
 │   ├── routes/                 # API endpoints
 │   ├── services/               # Business logic (financial, risk, opportunity)
 │   ├── utils/                  # Database, logging, utilities
-│   └── tests/                  # Comprehensive pytest suite (512 tests)
+│   └── tests/                  # Comprehensive pytest suite (687 tests)
 ├── frontend/
 │   ├── src/
 │   │   ├── App.js             # React Router setup
@@ -151,15 +151,22 @@ real-estate-analyzer/
 └── CLAUDE.md                   # This file
 ```
 
-## Recent Changes (v1.5.0)
+## Recent Changes (v1.6.0)
 
-- Property ownership: `user_id` tracked from JWT, PUT/DELETE enforce ownership (403), backward-compatible for legacy properties
-- API versioning: dual-path routes at `/api/v1/*` and `/api/*`
-- Redis integration: JWT blocklist, rate limiter, cache use Redis when available, fallback to in-memory
+- Flask application factory pattern: `create_app(config)` with config.py module (Base/Dev/Testing/Production configs)
+- Request validation middleware: `require_json_body`, `validate_objectid`, `require_entity` decorators in `utils/request_validators.py`
+- Circuit breaker for ZillowScraper with CLOSED/OPEN/HALF_OPEN states
+- Cursor-based pagination: `?cursor=<objectid>` alongside offset/limit
+- 132 frontend tests (14 suites) + 175 new backend tests (687 total backend, 819 total)
+- CONTRIBUTING.md, DEPLOYMENT.md, TROUBLESHOOTING.md, 4 ADRs
+- Chart.js registration consolidated into `chartSetup.js`
+- Locust load tests with 3 user profiles
+
+### v1.5.0
+
+- Property ownership, API versioning, Redis integration
 - React 18 + react-router v6 + axios 1.x migration
-- Frontend apiClient targets `/api/v1`
-- FilterPanel ARIA accessibility, FinancingCalculator slider debounce (300ms)
-- 107 new backend tests across 4 new files (512 total, all passing)
+- 512 backend tests
 
 ### v1.4.0
 

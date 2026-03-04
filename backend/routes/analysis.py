@@ -9,7 +9,7 @@ from services.analysis.opportunity_scoring import OpportunityScoring
 from services.geographic.market_aggregator import MarketAggregator
 from utils.database import get_db
 from utils.errors import error_response
-from utils.validation import is_valid_objectid as _is_valid_objectid
+from utils.request_validators import require_json_body, require_entity
 import logging
 
 logger = logging.getLogger(__name__)
@@ -48,15 +48,10 @@ def _get_market_dict(property_obj):
 
 
 class PropertyAnalysisResource(Resource):
-    def get(self, property_id):
+    @require_entity(Property, 'property_id', inject_as='property_obj')
+    def get(self, property_id, property_obj):
         """Get comprehensive analysis for a single property"""
         try:
-            if not _is_valid_objectid(property_id):
-                return error_response('Invalid property ID format', 'VALIDATION_ERROR', 400)
-            property_obj = Property.find_by_id(property_id)
-            if not property_obj:
-                return error_response('Property not found', 'NOT_FOUND', 404)
-
             market_data = _get_market_dict(property_obj)
 
             # Financial analysis
@@ -85,18 +80,11 @@ class PropertyAnalysisResource(Resource):
             logger.exception("Failed to analyze property %s", property_id)
             return error_response(str(e), 'INTERNAL_ERROR', 500)
 
-    def post(self, property_id):
+    @require_entity(Property, 'property_id', inject_as='property_obj')
+    @require_json_body
+    def post(self, property_id, property_obj, data):
         """Run custom analysis with user-defined parameters"""
         try:
-            if not _is_valid_objectid(property_id):
-                return error_response('Invalid property ID format', 'VALIDATION_ERROR', 400)
-            property_obj = Property.find_by_id(property_id)
-            if not property_obj:
-                return error_response('Property not found', 'NOT_FOUND', 404)
-
-            data = request.get_json(silent=True)
-            if not data or not isinstance(data, dict):
-                return error_response('Request body must be JSON', 'VALIDATION_ERROR', 400)
             market_data = _get_market_dict(property_obj)
 
             # Validate and bound user-supplied parameters
@@ -154,33 +142,28 @@ class PropertyAnalysisResource(Resource):
 
 
 class MarketAnalysisResource(Resource):
-    def get(self, market_id):
+    @require_entity(Market, 'market_id', inject_as='market_obj')
+    def get(self, market_id, market_obj):
         """Get market analysis for a specific market area"""
         try:
-            if not _is_valid_objectid(market_id):
-                return error_response('Invalid market ID format', 'VALIDATION_ERROR', 400)
-            market = Market.find_by_id(market_id)
-            if not market:
-                return error_response('Market not found', 'NOT_FOUND', 404)
-
             db = get_db()
             aggregator = MarketAggregator(db)
 
-            if market.market_type == 'state':
-                aggregate_data = aggregator.aggregate_by_state(market.state)
-            elif market.market_type == 'city':
-                aggregate_data = aggregator.aggregate_by_city(market.state, market.city)
-            elif market.market_type == 'zip_code':
-                aggregate_data = aggregator.aggregate_by_zip_code(market.zip_code)
+            if market_obj.market_type == 'state':
+                aggregate_data = aggregator.aggregate_by_state(market_obj.state)
+            elif market_obj.market_type == 'city':
+                aggregate_data = aggregator.aggregate_by_city(market_obj.state, market_obj.city)
+            elif market_obj.market_type == 'zip_code':
+                aggregate_data = aggregator.aggregate_by_zip_code(market_obj.zip_code)
             else:
                 return error_response('Invalid market type', 'INVALID_MARKET_TYPE', 400)
 
             result = {
-                'market_id': str(market._id),
-                'market_name': market.name,
-                'market_type': market.market_type,
+                'market_id': str(market_obj._id),
+                'market_name': market_obj.name,
+                'market_type': market_obj.market_type,
                 'aggregate_data': aggregate_data,
-                'market_metrics': market.metrics
+                'market_metrics': market_obj.metrics
             }
 
             return result, 200
@@ -189,33 +172,28 @@ class MarketAnalysisResource(Resource):
             logger.exception("Failed to get market analysis for %s", market_id)
             return error_response(str(e), 'INTERNAL_ERROR', 500)
 
-    def post(self, market_id):
+    @require_entity(Market, 'market_id', inject_as='market_obj')
+    def post(self, market_id, market_obj):
         """Run custom market analysis with user-defined parameters"""
         try:
-            if not _is_valid_objectid(market_id):
-                return error_response('Invalid market ID format', 'VALIDATION_ERROR', 400)
-            market = Market.find_by_id(market_id)
-            if not market:
-                return error_response('Market not found', 'NOT_FOUND', 404)
-
             db = get_db()
             aggregator = MarketAggregator(db)
 
-            if market.market_type == 'state':
-                aggregate_data = aggregator.aggregate_by_state(market.state)
-            elif market.market_type == 'city':
-                aggregate_data = aggregator.aggregate_by_city(market.state, market.city)
-            elif market.market_type == 'zip_code':
-                aggregate_data = aggregator.aggregate_by_zip_code(market.zip_code)
+            if market_obj.market_type == 'state':
+                aggregate_data = aggregator.aggregate_by_state(market_obj.state)
+            elif market_obj.market_type == 'city':
+                aggregate_data = aggregator.aggregate_by_city(market_obj.state, market_obj.city)
+            elif market_obj.market_type == 'zip_code':
+                aggregate_data = aggregator.aggregate_by_zip_code(market_obj.zip_code)
             else:
                 return error_response('Invalid market type', 'INVALID_MARKET_TYPE', 400)
 
             result = {
-                'market_id': str(market._id),
-                'market_name': market.name,
-                'market_type': market.market_type,
+                'market_id': str(market_obj._id),
+                'market_name': market_obj.name,
+                'market_type': market_obj.market_type,
                 'aggregate_data': aggregate_data,
-                'market_metrics': market.metrics
+                'market_metrics': market_obj.metrics
             }
 
             return result, 200
@@ -224,16 +202,12 @@ class MarketAnalysisResource(Resource):
             logger.exception("Failed custom market analysis for %s", market_id)
             return error_response(str(e), 'INTERNAL_ERROR', 500)
 
+
 class OpportunityScoringResource(Resource):
-    def get(self, property_id):
+    @require_entity(Property, 'property_id', inject_as='property_obj')
+    def get(self, property_id, property_obj):
         """Get investment opportunity score for a property"""
         try:
-            if not _is_valid_objectid(property_id):
-                return error_response('Invalid property ID format', 'VALIDATION_ERROR', 400)
-            property_obj = Property.find_by_id(property_id)
-            if not property_obj:
-                return error_response('Property not found', 'NOT_FOUND', 404)
-
             market_data = _get_market_dict(property_obj)
             scorer = OpportunityScoring(property_obj, market_data)
             result = scorer.calculate_score()
