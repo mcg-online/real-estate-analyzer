@@ -67,6 +67,9 @@ def _make_mock_property(**overrides: Any) -> MagicMock:
         k: v for k, v in prop_dict.items() if k != "_id"
     }
     mock._id = prop_dict["_id"]
+    # Explicitly set user_id to None so the ownership check in PUT/DELETE
+    # treats this as a legacy property (no owner restriction).
+    mock.user_id = None
     return mock
 
 
@@ -979,3 +982,232 @@ class TestPasswordValidation:
         assert response.status_code == 400
         data = response.get_json()
         assert "digit" in data["message"]
+
+
+# ---------------------------------------------------------------------------
+# Test: Property ownership authorization
+# ---------------------------------------------------------------------------
+
+class TestPropertyOwnership:
+    """Tests that PUT and DELETE are restricted to the property creator.
+
+    Patterns used throughout:
+    - _auth_headers(app, identity) mints a JWT for the given identity string.
+    - _make_mock_property_with_owner(owner) returns a MagicMock property
+      whose user_id attribute is set so the ownership check in the route can
+      inspect it via getattr(property, 'user_id', None).
+    - Database interactions are mocked at the route import site following the
+      same pattern as the rest of this test module.
+    """
+
+    _valid_payload: dict[str, Any] = {
+        "address": "789 Pine Road",
+        "city": "Portland",
+        "state": "OR",
+        "zip_code": "97201",
+        "price": 420000,
+        "bedrooms": 4,
+        "bathrooms": 2.5,
+        "sqft": 2200,
+        "year_built": 2010,
+        "property_type": "single_family",
+        "lot_size": 8000,
+        "listing_url": "http://example.com/listing/789",
+        "source": "zillow",
+    }
+
+    def _auth_headers(self, app: Any, identity: str = "owner-user") -> dict[str, str]:
+        """Return Authorization headers with a JWT minted for *identity*."""
+        from flask_jwt_extended import create_access_token
+        with app.app_context():
+            token = create_access_token(identity=identity)
+        return {"Authorization": f"Bearer {token}"}
+
+    def _make_mock_property_with_owner(self, owner: Any) -> MagicMock:
+        """Return a mock Property whose user_id matches *owner*."""
+        mock_prop = _make_mock_property()
+        mock_prop.user_id = owner
+        return mock_prop
+
+    def _make_mock_db(self) -> MagicMock:
+        """Return a minimal mock db suitable for PUT/DELETE calls."""
+        mock_collection = MagicMock()
+        mock_db = MagicMock()
+        mock_db.__getitem__.return_value = mock_collection
+        return mock_db
+
+    # ------------------------------------------------------------------
+    # POST — user_id is captured from the JWT and stored on the property
+    # ------------------------------------------------------------------
+
+    def test_post_sets_user_id(self, client: Any, app: Any) -> None:
+        """POST /api/properties stores the JWT identity as user_id."""
+        mock_db = MagicMock()
+        mock_collection = MagicMock()
+        mock_collection.find_one.return_value = None
+        mock_collection.insert_one.return_value = MagicMock(inserted_id="new_id")
+        mock_db.__getitem__.return_value = mock_collection
+
+        with patch("models.property.get_db", return_value=mock_db):
+            response = client.post(
+                "/api/properties",
+                json=self._valid_payload,
+                content_type="application/json",
+                headers=self._auth_headers(app, identity="owner-user"),
+            )
+        assert response.status_code == 201
+        data = response.get_json()
+        assert data.get("user_id") == "owner-user"
+
+    # ------------------------------------------------------------------
+    # PUT — ownership checks
+    # ------------------------------------------------------------------
+
+    def test_put_own_property_succeeds(self, client: Any, app: Any) -> None:
+        """PUT with a JWT matching the property's user_id returns 200."""
+        mock_prop = self._make_mock_property_with_owner("owner-user")
+        mock_db = self._make_mock_db()
+
+        with (
+            patch("models.property.Property.find_by_id", return_value=mock_prop),
+            patch("models.property.get_db", return_value=mock_db),
+        ):
+            response = client.put(
+                "/api/properties/64a1f2c3d4e5f6a7b8c9d0e1",
+                json={"price": 500000},
+                content_type="application/json",
+                headers=self._auth_headers(app, identity="owner-user"),
+            )
+        assert response.status_code == 200
+
+    def test_put_other_user_property_returns_403(self, client: Any, app: Any) -> None:
+        """PUT with a JWT that does not match the property's user_id returns 403."""
+        mock_prop = self._make_mock_property_with_owner("owner-user")
+        mock_db = self._make_mock_db()
+
+        with (
+            patch("models.property.Property.find_by_id", return_value=mock_prop),
+            patch("models.property.get_db", return_value=mock_db),
+        ):
+            response = client.put(
+                "/api/properties/64a1f2c3d4e5f6a7b8c9d0e1",
+                json={"price": 500000},
+                content_type="application/json",
+                headers=self._auth_headers(app, identity="other-user"),
+            )
+        assert response.status_code == 403
+        data = response.get_json()
+        assert "error" in data
+        assert data["error"]["code"] == "FORBIDDEN"
+
+    def test_put_legacy_property_without_owner_succeeds(self, client: Any, app: Any) -> None:
+        """PUT on a property with no user_id (legacy) returns 200 (backward compatible)."""
+        mock_prop = self._make_mock_property_with_owner(None)
+        mock_db = self._make_mock_db()
+
+        with (
+            patch("models.property.Property.find_by_id", return_value=mock_prop),
+            patch("models.property.get_db", return_value=mock_db),
+        ):
+            response = client.put(
+                "/api/properties/64a1f2c3d4e5f6a7b8c9d0e1",
+                json={"price": 500000},
+                content_type="application/json",
+                headers=self._auth_headers(app, identity="any-user"),
+            )
+        assert response.status_code == 200
+
+    # ------------------------------------------------------------------
+    # DELETE — ownership checks
+    # ------------------------------------------------------------------
+
+    def test_delete_own_property_succeeds(self, client: Any, app: Any) -> None:
+        """DELETE with a JWT matching the property's user_id returns 200."""
+        mock_prop = self._make_mock_property_with_owner("owner-user")
+        mock_db = self._make_mock_db()
+
+        with (
+            patch("models.property.Property.find_by_id", return_value=mock_prop),
+            patch("routes.properties.get_db", return_value=mock_db),
+        ):
+            response = client.delete(
+                "/api/properties/64a1f2c3d4e5f6a7b8c9d0e1",
+                headers=self._auth_headers(app, identity="owner-user"),
+            )
+        assert response.status_code == 200
+
+    def test_delete_other_user_property_returns_403(self, client: Any, app: Any) -> None:
+        """DELETE with a JWT that does not match the property's user_id returns 403."""
+        mock_prop = self._make_mock_property_with_owner("owner-user")
+        mock_db = self._make_mock_db()
+
+        with (
+            patch("models.property.Property.find_by_id", return_value=mock_prop),
+            patch("routes.properties.get_db", return_value=mock_db),
+        ):
+            response = client.delete(
+                "/api/properties/64a1f2c3d4e5f6a7b8c9d0e1",
+                headers=self._auth_headers(app, identity="other-user"),
+            )
+        assert response.status_code == 403
+        data = response.get_json()
+        assert "error" in data
+        assert data["error"]["code"] == "FORBIDDEN"
+
+
+# ---------------------------------------------------------------------------
+# Test: API versioning
+# ---------------------------------------------------------------------------
+
+class TestAPIVersioning:
+    """Tests that /api/v1/* routes work and legacy /api/* routes remain accessible."""
+
+    def _make_mock_db(self, count: int = 0) -> MagicMock:
+        mock_collection = MagicMock()
+        mock_collection.count_documents.return_value = count
+        mock_db = MagicMock()
+        mock_db.__getitem__.return_value = mock_collection
+        return mock_db
+
+    def test_v1_properties_endpoint(self, client: Any) -> None:
+        """GET /api/v1/properties returns 200 with a paginated payload."""
+        mock_prop = _make_mock_property()
+        mock_db = self._make_mock_db(count=1)
+        with (
+            patch("models.property.Property.find_all", return_value=[mock_prop]),
+            patch("routes.properties.get_db", return_value=mock_db),
+        ):
+            response = client.get("/api/v1/properties")
+        assert response.status_code == 200
+        data = response.get_json()
+        assert "data" in data
+
+    def test_legacy_properties_endpoint_still_works(self, client: Any) -> None:
+        """GET /api/properties (legacy path) still returns 200 for backward compatibility."""
+        mock_prop = _make_mock_property()
+        mock_db = self._make_mock_db(count=1)
+        with (
+            patch("models.property.Property.find_all", return_value=[mock_prop]),
+            patch("routes.properties.get_db", return_value=mock_db),
+        ):
+            response = client.get("/api/properties")
+        assert response.status_code == 200
+        data = response.get_json()
+        assert "data" in data
+
+    def test_v1_health_not_versioned(self, client: Any) -> None:
+        """GET /health is not versioned and still returns 200."""
+        response = client.get("/health")
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["status"] == "ok"
+
+    def test_home_shows_api_versions(self, client: Any) -> None:
+        """GET / response includes api_versions list and current_api fields."""
+        response = client.get("/")
+        assert response.status_code == 200
+        data = response.get_json()
+        assert "api_versions" in data
+        assert "v1" in data["api_versions"]
+        assert "current_api" in data
+        assert data["current_api"] == "/api/v1"

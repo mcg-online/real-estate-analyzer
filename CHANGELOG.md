@@ -5,6 +5,36 @@ All notable changes to the Real Estate Analyzer project will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-03-04
+
+### New Features
+- **Property ownership**: Properties now track `user_id` from JWT identity; PUT and DELETE enforce ownership (403 for non-owners), with backward compatibility for legacy properties without `user_id`
+- **API versioning**: All endpoints available at both `/api/v1/*` and legacy `/api/*` paths; home endpoint now includes `api_versions` metadata
+- **Redis integration**: JWT token blocklist, rate limiter, and response cache now use Redis when `REDIS_URL` is configured, with graceful fallback to in-memory stores
+- **Redis service**: Added Redis 7 Alpine to docker-compose.yml with health checks
+
+### Frontend
+- **React 18 migration**: Upgraded from React 17 to React 18 with `createRoot` API
+- **react-router v6**: Migrated from v5 (`Switch`/`component`) to v6 (`Routes`/`element`)
+- **axios 1.x**: Upgraded from 0.21 to 1.7
+- **API base URL**: Frontend apiClient now targets `/api/v1` prefix
+- **Accessibility**: FilterPanel now has proper `htmlFor`, `aria-label`, `role="group"`, and `aria-live="polite"` for screen reader support
+- **Performance**: FinancingCalculator sliders use `useDebounce` hook (300ms) for smooth interaction without excessive recalculation
+- **Removed dead dependency**: Removed unused `react-leaflet` from package.json
+
+### Testing
+- Added 107 new backend tests across 4 new test files:
+  - `test_auth.py`: 22 tests for JWT blocklist (in-memory + Redis)
+  - `test_data_collection.py`: 37 tests for ZillowScraper and DataCollectionService
+  - `test_database.py`: 23 tests for connection management and reconnection
+  - `test_scheduler.py`: 18 tests for scheduled task functions
+- Added 7 new tests in `test_routes.py`: property ownership (6) + API versioning (4), less 3 consolidated
+- 512 tests, all passing (up from 405)
+
+### Bug Fixes
+- Fixed test isolation: `test_scheduler.py` now handles stale module stubs left by `test_routes.py` fixture via autouse reimport fixture
+- Fixed mock properties missing `user_id` attribute causing false 403 responses in existing PUT tests
+
 ## [1.4.0] - 2026-03-03
 
 ### Security Fixes

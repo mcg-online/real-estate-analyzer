@@ -1,7 +1,7 @@
 from datetime import datetime
 from flask import request
 from flask_restful import Resource
-from flask_jwt_extended import jwt_required
+from flask_jwt_extended import jwt_required, get_jwt_identity
 from models.property import Property
 from utils.database import get_db
 from utils.errors import error_response
@@ -211,6 +211,7 @@ class PropertyListResource(Resource):
                 return error_response(error_msg, 'VALIDATION_ERROR', 400)
 
             # Create property
+            user_id = get_jwt_identity()
             property = Property(
                 address=data['address'],
                 city=data.get('city', ''),
@@ -228,7 +229,8 @@ class PropertyListResource(Resource):
                 latitude=data.get('latitude'),
                 longitude=data.get('longitude'),
                 images=data.get('images', []),
-                description=data.get('description')
+                description=data.get('description'),
+                user_id=user_id
             )
 
             # Save to database
@@ -277,6 +279,12 @@ class PropertyResource(Resource):
             if not property:
                 return error_response('Property not found', 'NOT_FOUND', 404)
 
+            # Ownership check: only the creator may update (legacy properties with no
+            # user_id are allowed through for backward compatibility)
+            property_owner = getattr(property, 'user_id', None)
+            if property_owner is not None and property_owner != get_jwt_identity():
+                return error_response('You do not own this property', 'FORBIDDEN', 403)
+
             data = request.get_json(silent=True)
             if not data or not isinstance(data, dict):
                 return error_response('Request body must be JSON', 'VALIDATION_ERROR', 400)
@@ -320,6 +328,12 @@ class PropertyResource(Resource):
             property = Property.find_by_id(property_id)
             if not property:
                 return error_response('Property not found', 'NOT_FOUND', 404)
+
+            # Ownership check: only the creator may delete (legacy properties with no
+            # user_id are allowed through for backward compatibility)
+            property_owner = getattr(property, 'user_id', None)
+            if property_owner is not None and property_owner != get_jwt_identity():
+                return error_response('You do not own this property', 'FORBIDDEN', 403)
 
             # Delete from database
             db = get_db()

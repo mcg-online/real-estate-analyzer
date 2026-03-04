@@ -13,6 +13,17 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
   backend:
     build: ./backend
     ports:
@@ -23,8 +34,11 @@ services:
     environment:
       - DATABASE_URL=mongodb://mongo:27017/realestate
       - JWT_SECRET=${JWT_SECRET}
+      - REDIS_URL=redis://redis:6379/0
     depends_on:
       mongo:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:

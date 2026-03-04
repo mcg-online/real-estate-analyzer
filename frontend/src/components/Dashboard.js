@@ -144,7 +144,7 @@ const Dashboard = () => {
         <div>
           <div className="bg-white rounded-lg shadow p-6">
             <h2 className="text-xl font-semibold mb-4">Filter Properties</h2>
-            <FilterPanel filters={filters} onFilterChange={handleFilterChange} />
+            <FilterPanel filters={filters} onFilterChange={handleFilterChange} resultsCount={properties.length} />
           </div>
         </div>
       </div>

@@ -12,7 +12,7 @@ class Property:
     def __init__(self, address, price, bedrooms, bathrooms, sqft, year_built,
                  property_type, lot_size, listing_url, source, latitude=None,
                  longitude=None, images=None, description=None, city='',
-                 state='', zip_code=''):
+                 state='', zip_code='', user_id=None):
         self.address = address
         self.city = city
         self.state = state
@@ -30,6 +30,7 @@ class Property:
         self.longitude = longitude
         self.images = images or []
         self.description = description
+        self.user_id = user_id
         self.created_at = datetime.now(timezone.utc)
         self.updated_at = self.created_at
         self.metrics = {}
@@ -90,6 +91,7 @@ class Property:
             'longitude': self.longitude,
             'images': self.images,
             'description': self.description,
+            'user_id': self.user_id,
             'created_at': self.created_at.isoformat() if isinstance(self.created_at, datetime) else self.created_at,
             'updated_at': self.updated_at.isoformat() if isinstance(self.updated_at, datetime) else self.updated_at,
             'metrics': self.metrics,
@@ -119,6 +121,7 @@ class Property:
                 zip_code=data.get('zip_code', '')
             )
             instance._id = data.get('_id')
+            instance.user_id = data.get('user_id')
             instance.created_at = data.get('created_at', instance.created_at)
             instance.updated_at = data.get('updated_at', instance.updated_at)
             instance.metrics = data.get('metrics', {})

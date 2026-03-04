@@ -132,7 +132,7 @@ real-estate-analyzer/
 │   ├── routes/                 # API endpoints
 │   ├── services/               # Business logic (financial, risk, opportunity)
 │   ├── utils/                  # Database, logging, utilities
-│   └── tests/                  # Comprehensive pytest suite (405 tests)
+│   └── tests/                  # Comprehensive pytest suite (512 tests)
 ├── frontend/
 │   ├── src/
 │   │   ├── App.js             # React Router setup
@@ -151,19 +151,20 @@ real-estate-analyzer/
 └── CLAUDE.md                   # This file
 ```
 
-## Recent Changes (v1.4.0)
+## Recent Changes (v1.5.0)
 
-- Dashboard and PropertyDetail now use `apiClient` with JWT auth (was bypassing auth with raw `axios`)
-- XSS prevention: map popup HTML escaping, listing URL scheme validation
-- Username validation: 3-64 chars, alphanumeric only
-- Analysis POST parameter bounds: validates and clamps all numeric params (prevents ZeroDivisionError)
-- Null body crash prevention: POST/PUT return 400 when body missing (was 500)
-- Fixed MapView lifecycle: separate init/marker useEffect hooks (no more destroy/recreate on every render)
-- Fixed FinancingCalculator interest rate slider value inversion
-- Fixed `calculate_roi()` ZeroDivisionError on zero initial investment
-- Fixed scheduler not starting under gunicorn (moved `run_scheduled_tasks()` to module level)
-- Removed dead code in Dashboard.js and MarketAnalysis POST
-- 15 new tests (405 total, all passing)
+- Property ownership: `user_id` tracked from JWT, PUT/DELETE enforce ownership (403), backward-compatible for legacy properties
+- API versioning: dual-path routes at `/api/v1/*` and `/api/*`
+- Redis integration: JWT blocklist, rate limiter, cache use Redis when available, fallback to in-memory
+- React 18 + react-router v6 + axios 1.x migration
+- Frontend apiClient targets `/api/v1`
+- FilterPanel ARIA accessibility, FinancingCalculator slider debounce (300ms)
+- 107 new backend tests across 4 new files (512 total, all passing)
+
+### v1.4.0
+
+- apiClient JWT auth fix, XSS prevention, parameter validation, null body handling
+- 405 tests
 
 ### v1.3.0
 

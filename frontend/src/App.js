@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { BrowserRouter as Router, Route, Switch, Link } from 'react-router-dom';
+import { BrowserRouter as Router, Route, Routes, Link } from 'react-router-dom';
 import Dashboard from './components/Dashboard';
 import PropertyDetail from './components/PropertyDetail';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -99,12 +99,12 @@ const App = () => {
         </nav>
 
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <Switch>
-            <Route exact path="/" component={Dashboard} />
-            <Route path="/property/:id" component={PropertyDetail} />
-            <Route path="/login" component={Login} />
-            <Route component={NotFound} />
-          </Switch>
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/property/:id" element={<PropertyDetail />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
         </main>
       </div>
     </Router>

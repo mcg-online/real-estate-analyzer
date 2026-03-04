@@ -1,7 +1,39 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+
+function useDebounce(callback, delay) {
+  const timeoutRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, []);
+
+  return useCallback((...args) => {
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    timeoutRef.current = setTimeout(() => callback(...args), delay);
+  }, [callback, delay]);
+}
 
 const FinancingCalculator = ({ property, financingOptions, onParamChange, params, onAnalyze }) => {
   const [selectedOption, setSelectedOption] = useState(0);
+
+  // Local display values for sliders so visual feedback is immediate
+  const [sliderValues, setSliderValues] = useState({
+    down_payment_percentage: (params.down_payment_percentage * 100).toFixed(0),
+    interest_rate: (params.interest_rate * 100).toFixed(3),
+  });
+
+  // Keep local slider values in sync when params change externally
+  useEffect(() => {
+    setSliderValues({
+      down_payment_percentage: (params.down_payment_percentage * 100).toFixed(0),
+      interest_rate: (params.interest_rate * 100).toFixed(3),
+    });
+  }, [params.down_payment_percentage, params.interest_rate]);
+
+  // Debounced version of onParamChange for slider inputs (300ms)
+  const debouncedParamChange = useDebounce(onParamChange, 300);
 
   const handleParamChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -16,7 +48,14 @@ const FinancingCalculator = ({ property, financingOptions, onParamChange, params
     } else {
       processedValue = value;
     }
-    onParamChange(name, processedValue);
+
+    // For slider inputs, update local display value immediately and debounce the calculation
+    if (name === 'down_payment_percentage' || name === 'interest_rate') {
+      setSliderValues(prev => ({ ...prev, [name]: value }));
+      debouncedParamChange(name, processedValue);
+    } else {
+      onParamChange(name, processedValue);
+    }
   };
 
   if (!property || !financingOptions) {
@@ -133,11 +172,11 @@ const FinancingCalculator = ({ property, financingOptions, onParamChange, params
                   name="down_payment_percentage"
                   min="0"
                   max="50"
-                  value={(params.down_payment_percentage * 100).toFixed(0)}
+                  value={sliderValues.down_payment_percentage}
                   onChange={handleParamChange}
                   className="flex-1"
                 />
-                <span className="text-sm font-medium w-12">{(params.down_payment_percentage * 100).toFixed(0)}%</span>
+                <span className="text-sm font-medium w-12">{sliderValues.down_payment_percentage}%</span>
               </div>
             </div>
 
@@ -150,11 +189,11 @@ const FinancingCalculator = ({ property, financingOptions, onParamChange, params
                   min="2"
                   max="10"
                   step="0.125"
-                  value={(params.interest_rate * 100).toFixed(3)}
+                  value={sliderValues.interest_rate}
                   onChange={handleParamChange}
                   className="flex-1"
                 />
-                <span className="text-sm font-medium w-16">{(params.interest_rate * 100).toFixed(3)}%</span>
+                <span className="text-sm font-medium w-16">{sliderValues.interest_rate}%</span>
               </div>
             </div>
 

@@ -13,3 +13,4 @@ aiohttp>=3.9
 backoff>=2.2
 beautifulsoup4>=4.12
 requests>=2.31
+redis>=5.0.0

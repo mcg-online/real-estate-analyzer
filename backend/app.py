@@ -13,7 +13,7 @@ import uuid
 from dotenv import load_dotenv
 import os
 
-__version__ = '1.4.0'
+__version__ = '1.5.0'
 
 from routes.properties import PropertyResource, PropertyListResource
 from routes.analysis import PropertyAnalysisResource, MarketAnalysisResource, TopMarketsResource, OpportunityScoringResource
@@ -52,22 +52,44 @@ def check_if_token_revoked(jwt_header, jwt_payload):
     return is_token_revoked(jwt_payload['jti'])
 
 
-cache = Cache(app, config={'CACHE_TYPE': 'SimpleCache'})
-limiter = Limiter(get_remote_address, app=app, default_limits=["200 per day", "50 per hour"])
+redis_url = os.getenv('REDIS_URL')
+if redis_url:
+    cache_config = {'CACHE_TYPE': 'RedisCache', 'CACHE_REDIS_URL': redis_url}
+    logger.info("Cache using Redis at %s", redis_url)
+else:
+    cache_config = {'CACHE_TYPE': 'SimpleCache'}
+    logger.info("Cache using SimpleCache (no REDIS_URL configured)")
+cache = Cache(app, config=cache_config)
+
+if redis_url:
+    limiter = Limiter(
+        get_remote_address,
+        app=app,
+        storage_uri=redis_url,
+        default_limits=["200 per day", "50 per hour"],
+    )
+    logger.info("Rate limiter using Redis storage")
+else:
+    limiter = Limiter(
+        get_remote_address,
+        app=app,
+        default_limits=["200 per day", "50 per hour"],
+    )
 
 # Initialize database
 init_db(app)
 
-# Register routes
-api.add_resource(PropertyListResource, '/api/properties')
-api.add_resource(PropertyResource, '/api/properties/<property_id>')
-api.add_resource(PropertyAnalysisResource, '/api/analysis/property/<property_id>')
-api.add_resource(MarketAnalysisResource, '/api/analysis/market/<market_id>')
-api.add_resource(TopMarketsResource, '/api/markets/top')
-api.add_resource(OpportunityScoringResource, '/api/analysis/score/<property_id>')
-api.add_resource(UserRegistration, '/api/auth/register')
-api.add_resource(UserLogin, '/api/auth/login')
-api.add_resource(UserLogout, '/api/auth/logout')
+# Register routes - each resource is available at both the versioned (/api/v1/*)
+# and legacy (/api/*) paths to maintain full backward compatibility.
+api.add_resource(PropertyListResource, '/api/v1/properties', '/api/properties')
+api.add_resource(PropertyResource, '/api/v1/properties/<property_id>', '/api/properties/<property_id>')
+api.add_resource(PropertyAnalysisResource, '/api/v1/analysis/property/<property_id>', '/api/analysis/property/<property_id>')
+api.add_resource(MarketAnalysisResource, '/api/v1/analysis/market/<market_id>', '/api/analysis/market/<market_id>')
+api.add_resource(TopMarketsResource, '/api/v1/markets/top', '/api/markets/top')
+api.add_resource(OpportunityScoringResource, '/api/v1/analysis/score/<property_id>', '/api/analysis/score/<property_id>')
+api.add_resource(UserRegistration, '/api/v1/auth/register', '/api/auth/register')
+api.add_resource(UserLogin, '/api/v1/auth/login', '/api/auth/login')
+api.add_resource(UserLogout, '/api/v1/auth/logout', '/api/auth/logout')
 
 
 # Request logging middleware
@@ -102,7 +124,9 @@ def after_request(response):
 def home():
     return jsonify({
         'message': 'Real Estate Investment Analysis API',
-        'version': __version__
+        'version': __version__,
+        'api_versions': ['v1'],
+        'current_api': '/api/v1'
     })
 
 
