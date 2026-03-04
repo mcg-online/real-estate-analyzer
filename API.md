@@ -21,12 +21,31 @@ Complete documentation for the Real Estate Analyzer API. This API provides compr
 - **Development**: `http://localhost:5000`
 - **Production**: Set via `REACT_APP_API_URL` environment variable
 
+### API Versioning
+
+All endpoints are available at both versioned and legacy paths:
+- **Recommended (v1)**: `/api/v1/properties`, `/api/v1/auth/login`, `/api/v1/analysis/*`, etc.
+- **Legacy (backward compatible)**: `/api/properties`, `/api/auth/login`, `/api/analysis/*`, etc.
+
+The home endpoint (`GET /`) now returns available API versions:
+
+```json
+{
+  "message": "Real Estate Investment Analysis API",
+  "version": "1.5.0",
+  "api_versions": ["v1"],
+  "current_api": "/api/v1"
+}
+```
+
 ### Example Request
 
 ```bash
-curl -X GET http://localhost:5000/api/properties \
+curl -X GET http://localhost:5000/api/v1/properties \
   -H "Authorization: Bearer your_access_token"
 ```
+
+Both `/api/v1/properties` and `/api/properties` are supported.
 
 ## Authentication
 
@@ -50,13 +69,23 @@ Tokens expire after a configurable period (default: 1 hour). The expiration is s
 
 ## Rate Limiting
 
-API requests are rate limited per IP address to ensure fair usage and service stability.
+API requests are rate limited per IP address to ensure fair usage and service stability. Rate limiting is Redis-backed for multi-worker deployments.
 
 **Rate Limits:**
 - **Daily limit**: 200 requests per day
 - **Hourly limit**: 50 requests per hour
 
 When rate limit is exceeded, the API returns a 429 (Too Many Requests) status code.
+
+**Configuration:**
+
+Redis-backed rate limiting requires the `REDIS_URL` environment variable:
+
+```bash
+REDIS_URL=redis://localhost:6379/0
+```
+
+If `REDIS_URL` is not configured, rate limiting uses in-process storage (not suitable for multi-worker deployments).
 
 ## Security Headers
 
@@ -106,7 +135,7 @@ Deep readiness check that verifies critical dependencies. This checks MongoDB co
       "status": "ok"
     }
   },
-  "version": "1.4.0"
+  "version": "1.5.0"
 }
 ```
 
@@ -124,7 +153,7 @@ Deep readiness check that verifies critical dependencies. This checks MongoDB co
       "detail": "No heartbeat for 720s"
     }
   },
-  "version": "1.4.0"
+  "version": "1.5.0"
 }
 ```
 
@@ -146,9 +175,11 @@ Liveness probe to check if the process is responsive. Used by Kubernetes and oth
 
 ## Properties
 
-Property endpoints allow you to list, create, retrieve, update, and delete real estate properties in the system.
+Property endpoints allow you to list, create, retrieve, update, and delete real estate properties in the system. All endpoints are available at both `/api/v1/properties` (recommended) and `/api/properties` (legacy).
 
-### GET /api/properties
+### GET /api/v1/properties
+
+**Legacy path**: `/api/properties`
 
 List properties with support for filtering, pagination, and sorting.
 
@@ -177,7 +208,7 @@ List properties with support for filtering, pagination, and sorting.
 **Example Request:**
 
 ```bash
-curl -X GET "http://localhost:5000/api/properties?minPrice=200000&maxPrice=500000&state=CA&limit=20&page=1" \
+curl -X GET "http://localhost:5000/api/v1/properties?minPrice=200000&maxPrice=500000&state=CA&limit=20&page=1" \
   -H "Authorization: Bearer your_access_token"
 ```
 
@@ -221,9 +252,13 @@ curl -X GET "http://localhost:5000/api/properties?minPrice=200000&maxPrice=50000
 
 ---
 
-### POST /api/properties
+### POST /api/v1/properties
 
 Create a new property in the system.
+
+**Legacy path**: `/api/properties`
+
+**Authentication**: Required. The `user_id` is automatically set from the JWT token identity. The authenticated user becomes the property owner.
 
 **Request Body (application/json):**
 
@@ -294,10 +329,13 @@ Create a new property in the system.
   "description": "Charming Victorian-style home with updated utilities",
   "images": ["https://example.com/images/789-1.jpg"],
   "score": 0,
+  "user_id": "507f1f77bcf86cd799439099",
   "created_at": "2024-01-21T11:30:00Z",
   "updated_at": "2024-01-21T11:30:00Z"
 }
 ```
+
+Note: The `user_id` field is automatically populated from the JWT token and cannot be overridden in the request body.
 
 **Error Response (400 Bad Request):**
 ```json
@@ -321,9 +359,11 @@ Create a new property in the system.
 
 ---
 
-### GET /api/properties/<property_id>
+### GET /api/v1/properties/<property_id>
 
 Retrieve a single property by its ID.
+
+**Legacy path**: `/api/properties/<property_id>`
 
 **Path Parameters:**
 
@@ -334,7 +374,7 @@ Retrieve a single property by its ID.
 **Example Request:**
 
 ```bash
-curl -X GET "http://localhost:5000/api/properties/507f1f77bcf86cd799439011" \
+curl -X GET "http://localhost:5000/api/v1/properties/507f1f77bcf86cd799439011" \
   -H "Authorization: Bearer your_access_token"
 ```
 
@@ -374,9 +414,13 @@ curl -X GET "http://localhost:5000/api/properties/507f1f77bcf86cd799439011" \
 
 ---
 
-### PUT /api/properties/<property_id>
+### PUT /api/v1/properties/<property_id>
 
 Update a property. Send only the fields you want to modify.
+
+**Legacy path**: `/api/properties/<property_id>`
+
+**Authentication**: Required. Ownership verification is enforced—returns 403 Forbidden if the authenticated user's ID does not match the property's `user_id`. Legacy properties without a `user_id` field are allowed to be updated for backward compatibility.
 
 **Path Parameters:**
 
@@ -399,7 +443,7 @@ Only the following fields can be updated: `address`, `city`, `state`, `zip_code`
 **Example Request:**
 
 ```bash
-curl -X PUT "http://localhost:5000/api/properties/507f1f77bcf86cd799439011" \
+curl -X PUT "http://localhost:5000/api/v1/properties/507f1f77bcf86cd799439011" \
   -H "Authorization: Bearer your_access_token" \
   -H "Content-Type: application/json" \
   -d '{"price": 360000, "description": "Price reduced!"}'
@@ -449,11 +493,25 @@ curl -X PUT "http://localhost:5000/api/properties/507f1f77bcf86cd799439011" \
 }
 ```
 
+**Error Response (403 Forbidden - ownership mismatch):**
+```json
+{
+  "error": {
+    "code": "FORBIDDEN",
+    "message": "You do not own this property"
+  }
+}
+```
+
 ---
 
-### DELETE /api/properties/<property_id>
+### DELETE /api/v1/properties/<property_id>
 
 Delete a property from the system.
+
+**Legacy path**: `/api/properties/<property_id>`
+
+**Authentication**: Required. Ownership verification is enforced—returns 403 Forbidden if the authenticated user's ID does not match the property's `user_id`. Legacy properties without a `user_id` field are allowed to be deleted for backward compatibility.
 
 **Path Parameters:**
 
@@ -464,7 +522,7 @@ Delete a property from the system.
 **Example Request:**
 
 ```bash
-curl -X DELETE "http://localhost:5000/api/properties/507f1f77bcf86cd799439011" \
+curl -X DELETE "http://localhost:5000/api/v1/properties/507f1f77bcf86cd799439011" \
   -H "Authorization: Bearer your_access_token"
 ```
 
@@ -482,13 +540,23 @@ curl -X DELETE "http://localhost:5000/api/properties/507f1f77bcf86cd799439011" \
 }
 ```
 
+**Error Response (403 Forbidden - ownership mismatch):**
+```json
+{
+  "error": {
+    "code": "FORBIDDEN",
+    "message": "You do not own this property"
+  }
+}
+```
+
 ---
 
 ## Analysis
 
-Analysis endpoints provide comprehensive investment analysis for properties and markets. These include financial metrics, tax benefits analysis, and financing options.
+Analysis endpoints provide comprehensive investment analysis for properties and markets. These include financial metrics, tax benefits analysis, and financing options. All endpoints are available at both `/api/v1/analysis/*` (recommended) and `/api/analysis/*` (legacy).
 
-### GET /api/analysis/property/<property_id>
+### GET /api/v1/analysis/property/<property_id>
 
 Get comprehensive investment analysis for a property with default parameters. The API automatically looks up market data by property location (zip code > city > state > defaults).
 
@@ -498,10 +566,12 @@ Get comprehensive investment analysis for a property with default parameters. Th
 |-----------|------|-------------|
 | `property_id` | string | MongoDB ObjectId of the property |
 
+**Legacy path**: `/api/analysis/property/<property_id>`
+
 **Example Request:**
 
 ```bash
-curl -X GET "http://localhost:5000/api/analysis/property/507f1f77bcf86cd799439011" \
+curl -X GET "http://localhost:5000/api/v1/analysis/property/507f1f77bcf86cd799439011" \
   -H "Authorization: Bearer your_access_token"
 ```
 
@@ -596,9 +666,11 @@ curl -X GET "http://localhost:5000/api/analysis/property/507f1f77bcf86cd79943901
 
 ---
 
-### POST /api/analysis/property/<property_id>
+### POST /api/v1/analysis/property/<property_id>
 
 Run custom investment analysis with user-defined parameters.
+
+**Legacy path**: `/api/analysis/property/<property_id>`
 
 **Path Parameters:**
 
@@ -638,7 +710,7 @@ All numeric parameters are clamped to their valid ranges. Invalid (non-numeric) 
 **Example Request:**
 
 ```bash
-curl -X POST "http://localhost:5000/api/analysis/property/507f1f77bcf86cd799439011" \
+curl -X POST "http://localhost:5000/api/v1/analysis/property/507f1f77bcf86cd799439011" \
   -H "Authorization: Bearer your_access_token" \
   -H "Content-Type: application/json" \
   -d '{
@@ -695,9 +767,9 @@ Same structure as GET endpoint:
 
 ## Markets
 
-Market endpoints provide aggregated analysis across properties in specific geographic areas.
+Market endpoints provide aggregated analysis across properties in specific geographic areas. All endpoints are available at both `/api/v1/*` (recommended) and `/api/*` (legacy).
 
-### GET /api/analysis/market/<market_id>
+### GET /api/v1/analysis/market/<market_id>
 
 Get market analysis for a specific market area with aggregated property data.
 
@@ -707,10 +779,12 @@ Get market analysis for a specific market area with aggregated property data.
 |-----------|------|-------------|
 | `market_id` | string | MongoDB ObjectId of the market |
 
+**Legacy path**: `/api/analysis/market/<market_id>`
+
 **Example Request:**
 
 ```bash
-curl -X GET "http://localhost:5000/api/analysis/market/507f1f77bcf86cd799439014" \
+curl -X GET "http://localhost:5000/api/v1/analysis/market/507f1f77bcf86cd799439014" \
   -H "Authorization: Bearer your_access_token"
 ```
 
@@ -756,9 +830,11 @@ curl -X GET "http://localhost:5000/api/analysis/market/507f1f77bcf86cd799439014"
 
 ---
 
-### POST /api/analysis/market/<market_id>
+### POST /api/v1/analysis/market/<market_id>
 
 Run custom market analysis with user-defined parameters.
+
+**Legacy path**: `/api/analysis/market/<market_id>`
 
 **Path Parameters:**
 
@@ -781,7 +857,7 @@ Run custom market analysis with user-defined parameters.
 **Example Request:**
 
 ```bash
-curl -X POST "http://localhost:5000/api/analysis/market/507f1f77bcf86cd799439014" \
+curl -X POST "http://localhost:5000/api/v1/analysis/market/507f1f77bcf86cd799439014" \
   -H "Authorization: Bearer your_access_token" \
   -H "Content-Type: application/json" \
   -d '{
@@ -815,9 +891,11 @@ Same structure as GET endpoint, with the addition of a `parameters` field:
 
 ---
 
-### GET /api/markets/top
+### GET /api/v1/markets/top
 
 Get top performing markets ranked by investment metrics. Useful for identifying markets with the best investment opportunities.
+
+**Legacy path**: `/api/markets/top`
 
 **Query Parameters:**
 
@@ -830,11 +908,11 @@ Get top performing markets ranked by investment metrics. Useful for identifying 
 
 ```bash
 # Get top 10 markets by ROI
-curl -X GET "http://localhost:5000/api/markets/top?metric=roi&limit=10" \
+curl -X GET "http://localhost:5000/api/v1/markets/top?metric=roi&limit=10" \
   -H "Authorization: Bearer your_access_token"
 
 # Get top 20 markets by cap rate
-curl -X GET "http://localhost:5000/api/markets/top?metric=cap_rate&limit=20" \
+curl -X GET "http://localhost:5000/api/v1/markets/top?metric=cap_rate&limit=20" \
   -H "Authorization: Bearer your_access_token"
 ```
 
@@ -901,11 +979,13 @@ curl -X GET "http://localhost:5000/api/markets/top?metric=cap_rate&limit=20" \
 
 ## Authentication Endpoints
 
-Authentication endpoints manage user registration, login, and logout. These endpoints do not require JWT authentication.
+Authentication endpoints manage user registration, login, and logout. These endpoints do not require JWT authentication. All endpoints are available at both `/api/v1/auth/*` (recommended) and `/api/auth/*` (legacy).
 
-### POST /api/auth/register
+### POST /api/v1/auth/register
 
 Register a new user account.
+
+**Legacy path**: `/api/auth/register`
 
 **Request Body (application/json):**
 
@@ -927,7 +1007,7 @@ Register a new user account.
 **Example Request:**
 
 ```bash
-curl -X POST "http://localhost:5000/api/auth/register" \
+curl -X POST "http://localhost:5000/api/v1/auth/register" \
   -H "Content-Type: application/json" \
   -d '{
     "username": "john_investor",
@@ -978,9 +1058,11 @@ curl -X POST "http://localhost:5000/api/auth/register" \
 
 ---
 
-### POST /api/auth/login
+### POST /api/v1/auth/login
 
 Authenticate a user and receive a JWT access token.
+
+**Legacy path**: `/api/auth/login`
 
 **Request Body (application/json):**
 
@@ -998,7 +1080,7 @@ Authenticate a user and receive a JWT access token.
 **Example Request:**
 
 ```bash
-curl -X POST "http://localhost:5000/api/auth/login" \
+curl -X POST "http://localhost:5000/api/v1/auth/login" \
   -H "Content-Type: application/json" \
   -d '{
     "username": "john_investor",
@@ -1022,9 +1104,11 @@ curl -X POST "http://localhost:5000/api/auth/login" \
 
 ---
 
-### POST /api/auth/logout
+### POST /api/v1/auth/logout
 
 Logout the current user. Requires a valid JWT token.
+
+**Legacy path**: `/api/auth/logout`
 
 **Headers:**
 ```
@@ -1034,7 +1118,7 @@ Authorization: Bearer your_access_token
 **Example Request:**
 
 ```bash
-curl -X POST "http://localhost:5000/api/auth/logout" \
+curl -X POST "http://localhost:5000/api/v1/auth/logout" \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 ```
 
@@ -1064,6 +1148,7 @@ All API endpoints return appropriate HTTP status codes and error responses. Erro
 |-------------|-------------|-----------------|
 | 400 | Bad Request | Missing required field, invalid parameter format |
 | 401 | Unauthorized | Missing JWT token, invalid token, user not logged in |
+| 403 | Forbidden | User does not own the resource (property/market update/delete) |
 | 404 | Not Found | Property/market ID doesn't exist |
 | 409 | Conflict | Username already exists during registration |
 | 429 | Too Many Requests | Rate limit exceeded |
@@ -1101,6 +1186,17 @@ Invalid ObjectId format:
   "error": {
     "code": "INVALID_ID",
     "message": "Invalid property ID format"
+  }
+}
+```
+
+Ownership violation:
+
+```json
+{
+  "error": {
+    "code": "FORBIDDEN",
+    "message": "You do not own this property"
   }
 }
 ```
@@ -1182,20 +1278,24 @@ async function fetchProperty(propertyId, token) {
 
 ```bash
 # 1. Search for properties in your price range
-curl "http://localhost:5000/api/properties?minPrice=250000&maxPrice=500000&state=CA&limit=50"
+curl "http://localhost:5000/api/v1/properties?minPrice=250000&maxPrice=500000&state=CA&limit=50" \
+  -H "Authorization: Bearer your_access_token"
 
 # 2. Get detailed analysis for a property
-curl "http://localhost:5000/api/analysis/property/PROPERTY_ID"
+curl "http://localhost:5000/api/v1/analysis/property/PROPERTY_ID" \
+  -H "Authorization: Bearer your_access_token"
 
 # 3. Compare with market analysis
-curl "http://localhost:5000/api/analysis/market/MARKET_ID"
+curl "http://localhost:5000/api/v1/analysis/market/MARKET_ID" \
+  -H "Authorization: Bearer your_access_token"
 ```
 
 ### Custom Investment Analysis
 
 ```bash
 # Run analysis with custom financing terms
-curl -X POST "http://localhost:5000/api/analysis/property/PROPERTY_ID" \
+curl -X POST "http://localhost:5000/api/v1/analysis/property/PROPERTY_ID" \
+  -H "Authorization: Bearer your_access_token" \
   -H "Content-Type: application/json" \
   -d '{
     "down_payment_percentage": 0.25,
@@ -1209,10 +1309,12 @@ curl -X POST "http://localhost:5000/api/analysis/property/PROPERTY_ID" \
 
 ```bash
 # Get top 15 markets by ROI
-curl "http://localhost:5000/api/markets/top?metric=roi&limit=15"
+curl "http://localhost:5000/api/v1/markets/top?metric=roi&limit=15" \
+  -H "Authorization: Bearer your_access_token"
 
 # Get top 10 markets by cap rate
-curl "http://localhost:5000/api/markets/top?metric=cap_rate&limit=10"
+curl "http://localhost:5000/api/v1/markets/top?metric=cap_rate&limit=10" \
+  -H "Authorization: Bearer your_access_token"
 ```
 
 ---
@@ -1227,6 +1329,6 @@ For API issues, questions, or feature requests:
 
 ---
 
-**API Version:** 1.4.0
-**Last Updated:** 2026-03-03
+**API Version:** 1.5.0
+**Last Updated:** 2026-03-04
 **Documentation Status:** Current

@@ -2,30 +2,35 @@
 
 This document tracks known issues, feature gaps, and improvement opportunities for the Real Estate Analyzer project.
 
+## Completed in v1.5.0
+
+These items have been successfully implemented and should not be revisited:
+
+- **Ownership verification on PUT/DELETE property endpoints** - Property ownership model implemented with user_id linking. All PUT/DELETE endpoints enforce 403 Forbidden for non-owners.
+- **Rate limiter and cache Redis backing** - Redis integration added for distributed rate limiting and caching across gunicorn workers.
+- **JWT token blocklist persistence** - Redis-backed blocklist with in-memory fallback for distributed deployments.
+- **Outdated frontend dependencies** - React upgraded to 18, react-router to v6, axios to 1.x.
+- **Dead dependency: react-leaflet** - Removed from package.json.
+- **FilterPanel accessibility issues** - ARIA labels, htmlFor associations, and role attributes added.
+- **FinancingCalculator slider debounce** - useDebounce hook (300ms) implemented for optimized recalculation.
+- **Unit tests for ZillowScraper, DataCollectionService, database.py** - Full coverage added (512 tests total).
+- **Scheduler tests** - 18 tests added for watchdog thread, heartbeat tracking, and auto-restart logic.
+- **API versioning** - Dual-path routes (/api/v1/* and /api/*) implemented for forward compatibility.
+
 ## Known Issues (Low Priority)
 
-- **No ownership verification on PUT/DELETE property endpoints** - Any authenticated user can modify any property. Implement property ownership model linking properties to creator users.
 - **No circuit breaker for Zillow scraper service** - Scraper can fail repeatedly without backoff, hammering the Zillow API. Add circuit breaker pattern with exponential backoff.
-- **Rate limiter and cache are in-process only** - Not Redis-backed for multi-worker gunicorn deployments. Scale to distributed rate limiting and caching.
 - **Mixed async/sync in ZillowScraper** - Uses aiohttp for async HTTP but not fully async throughout. Refactor to pure async or pure sync.
-- **JWT token blocklist is in-memory only** - Not persisted across restarts and not shared across workers. Move to Redis for distributed deployments.
 
 ## Frontend Issues
 
-- **Outdated dependencies** - axios@0.21 (current is 1.x), React 17 (current is 18+), react-router v5 (current is v6)
-- **No frontend tests** - All 405 tests are backend only. Add Jest/React Testing Library tests for components.
-- **Dead dependency: react-leaflet** - Listed in package.json but MapView uses raw Leaflet directly instead of react-leaflet wrapper.
-- **FilterPanel accessibility issues** - Missing ARIA labels and keyboard navigation support. Add role, aria-label, and keyboard event handlers.
+- **No frontend tests** - All 512 tests are backend only. Add Jest/React Testing Library tests for components.
 - **Duplicate Chart.js register() calls** - Multiple components register the same Chart.js plugins. Consolidate to single location.
-- **FinancingCalculator slider has no debounce** - Recalculates on every pixel of drag. Add debounced onChange handler or use input range with onChangeCapture.
 
 ## Architecture Improvements
 
-- **Add Redis** - Implement shared rate limiting, caching, and JWT blocklist across gunicorn workers for production deployments.
-- **Add property ownership model** - Link properties to users who created them. Enforce ownership checks on PUT/DELETE endpoints.
 - **Add pagination cursor-based option** - Implement cursor-based pagination alongside offset/limit for large datasets.
 - **Add request validation middleware** - Centralize input validation instead of duplicating validation logic in each route handler.
-- **Add API versioning** - Prefix routes with /api/v1 to support future API changes without breaking clients.
 - **Migrate to Flask application factory pattern** - Move app creation to factory function for easier testing and configuration management.
 
 ## Feature Roadmap
@@ -52,8 +57,6 @@ This document tracks known issues, feature gaps, and improvement opportunities f
 - **No integration tests** - Missing end-to-end API flow tests across multiple endpoints.
 - **No load/performance tests** - Add stress tests with tools like locust or Apache JMeter.
 - **No contract tests** - Add contract tests between frontend and backend API to catch breaking changes.
-- **Missing unit tests** - Add coverage for ZillowScraper, DataCollectionService, database.py reconnection logic.
-- **Missing scheduler tests** - Add tests for scheduler watchdog thread, heartbeat tracking, and auto-restart logic.
 
 ## Documentation
 
@@ -66,5 +69,6 @@ This document tracks known issues, feature gaps, and improvement opportunities f
 
 ---
 
-**Last updated**: 2026-03-03
+**Last updated**: 2026-03-04
 **Contributors**: Development Team
+**Current version**: v1.5.0 (512 tests, Redis integration, ownership enforcement, modernized frontend)

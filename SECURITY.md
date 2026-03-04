@@ -1,15 +1,15 @@
 # Security Policy
 
-Real Estate Analyzer v1.4.0 - Security documentation and responsible disclosure guidelines.
+Real Estate Analyzer v1.5.0 - Security documentation and responsible disclosure guidelines.
 
 ## Supported Versions
 
 | Version | Status | Support Until |
 |---------|--------|---------------|
-| 1.4.0   | Supported | Current |
-| 1.3.0   | Supported | 6 months |
-| 1.2.0   | Security fixes only | 3 months |
-| < 1.2.0 | Unsupported | Upgrade required |
+| 1.5.0   | Current | Latest |
+| 1.4.0   | Supported | 6 months |
+| 1.3.0   | Security fixes only | 3 months |
+| < 1.3.0 | Unsupported | Upgrade required |
 
 ## Reporting a Vulnerability
 
@@ -28,18 +28,28 @@ We take security seriously. If you discover a security vulnerability, please rep
 
 **Confidentiality**: Please do not publicly disclose the vulnerability until a fix is released. We will work with you to coordinate responsible disclosure.
 
-## Security Features (v1.4.0)
+## Security Features (v1.5.0)
 
 ### Authentication & Authorization
 
 - **JWT Authentication** - Uses Flask-JWT-Extended for token-based authentication on protected endpoints
 - **Bcrypt Password Hashing** - Passwords hashed with werkzeug.security for secure storage
 - **Configurable Token Expiration** - JWT tokens expire after 1 hour (configurable via `JWT_EXPIRY_SECONDS` environment variable)
-- **Token Blocklist for Logout** - Logout support via token revocation (in-memory blocklist in v1.4.0, Redis in v1.5.0+)
+- **Token Blocklist for Logout** - Logout support via token revocation using Redis-backed blocklist with in-memory fallback
 - **Startup Secret Validation** - Rejects weak JWT secrets on startup:
   - Rejects placeholder values: `your_secret_key`, `changeme`, `secret`
   - Requires minimum 32 characters for production deployments
   - Logs warning in development mode if weak secret detected
+
+### Property Ownership Authorization
+
+- **User ID Capture** - User ID extracted from JWT token claims on property creation (POST /api/properties)
+- **Ownership Enforcement** - PUT and DELETE operations validate `user_id` ownership:
+  - Returns 403 Forbidden if authenticated user does not own the property
+  - Prevents unauthorized modification or deletion
+- **Backward Compatibility** - Legacy properties without `user_id` remain readable to all authenticated users
+  - New properties require ownership verification
+  - Graceful migration path for existing deployments
 
 ### Input Validation
 
@@ -100,13 +110,25 @@ Referrer-Policy: strict-origin-when-cross-origin
 Strict-Transport-Security: max-age=31536000; includeSubDomains (production only)
 ```
 
+### Redis-Backed Security Infrastructure
+
+- **Rate Limiter** - Request rate limits tracked globally via Redis when `REDIS_URL` configured
+  - Falls back to in-process tracking if Redis unavailable
+  - Supports multi-worker deployments with consistent global limits
+- **JWT Token Blocklist** - Revoked tokens stored in Redis for logout support
+  - Falls back to in-memory storage if Redis unavailable
+  - Shared across all worker processes
+- **Cache Layer** - Session and response cache using Redis backend
+  - Supports distributed caching across multiple workers
+  - Falls back to in-process SimpleCache if Redis unavailable
+
 ### Rate Limiting
 
 - **200 requests per day** per IP address
 - **50 requests per hour** per IP address
-- Enforced via Flask-Limiter
+- Enforced via Flask-Limiter with optional Redis backend
 - Configurable via environment variables (`RATELIMIT_STORAGE_URL`, etc.)
-- In-process implementation in v1.4.0 (use Redis backend for multi-worker deployments)
+- Supports both single-worker and multi-worker deployments
 
 ### CORS
 
@@ -114,6 +136,13 @@ Strict-Transport-Security: max-age=31536000; includeSubDomains (production only)
 - **Credentials Support** - `supports_credentials=True` for cookie-based authentication
 - **Allowed Methods** - GET, POST, PUT, DELETE, OPTIONS
 - **Allowed Headers** - Content-Type, Authorization, Accept
+
+### API Versioning
+
+- **Dual-Path Routing** - API endpoints available at both `/api/v1/*` and `/api/*` paths
+- **Backward Compatibility** - Legacy `/api/*` paths supported for existing clients
+- **Version Migration** - Clients can migrate to `/api/v1/*` on their own timeline
+- **Future Versions** - New endpoint versions can be introduced without breaking existing deployments
 
 ### Request Logging & Monitoring
 
@@ -128,12 +157,8 @@ Strict-Transport-Security: max-age=31536000; includeSubDomains (production only)
 
 These are security gaps that should be addressed in future versions:
 
-- **JWT Blocklist is In-Memory** - Not shared across gunicorn worker processes or persisted across restarts. Tokens revoked via logout are only blocked in that specific worker. Upgrade to Redis-backed blocklist for production.
-- **Rate Limiter is In-Process** - Limits are tracked per gunicorn worker, not globally across all workers. Multiple workers can bypass rate limits. Use Redis backend for distributed rate limiting.
-- **No Ownership Verification on Property CRUD** - Any authenticated user can read, modify, or delete any property. Properties should be linked to users with ownership checks on PUT/DELETE.
 - **No CSRF Protection** - Relies on JWT Bearer tokens (not vulnerable to traditional CSRF). If adding cookie-based sessions, implement CSRF tokens.
 - **No API Key Rotation Mechanism** - If deploying with API keys, implement key rotation and versioning.
-- **Cache is In-Process SimpleCache** - Not shared across workers or persisted. Use Redis for shared caching across gunicorn workers.
 - **No Two-Factor Authentication** - Implement 2FA for sensitive operations (admin functions, account recovery).
 - **No Audit Logging** - Add comprehensive audit trail for sensitive operations (property modifications, user account changes).
 
@@ -183,7 +208,15 @@ THREADS_PER_WORKER=4
 
 ## Security Changelog
 
-### v1.4.0 (Current)
+### v1.5.0 (Current)
+- Added property ownership authorization with user_id capture and enforcement
+- Added Redis-backed token blocklist with in-memory fallback
+- Added Redis-backed rate limiter with graceful degradation
+- Added Redis-backed cache layer for multi-worker deployments
+- Added API versioning with dual-path routing (/api/v1/* and /api/*)
+- Improved backward compatibility for properties without user_id field
+
+### v1.4.0
 - Added XSS prevention with HTML escaping in Leaflet popups
 - Added URL scheme validation (only http/https allowed)
 - Added username validation (3-64 chars, alphanumeric + hyphens/underscores/dots)
@@ -225,5 +258,5 @@ No known vulnerabilities have been publicly disclosed for this project. To repor
 
 ---
 
-**Last updated**: 2026-03-03
+**Last updated**: 2026-03-04
 **Contact**: For security questions, email security@realestate-analyzer.local

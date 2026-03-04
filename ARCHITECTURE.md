@@ -53,7 +53,8 @@ The Flask application initializes and coordinates all backend services.
 
 **Property Model**
 - MongoDB document representing a real estate listing
-- Fields: address, city, state, zip_code, price, bedrooms, bathrooms, sqft, year_built, property_type, lot_size, listing_url, source, latitude, longitude, images, description, created_at, updated_at, metrics, score
+- Fields: address, city, state, zip_code, price, bedrooms, bathrooms, sqft, year_built, property_type, lot_size, listing_url, source, latitude, longitude, images, description, created_at, updated_at, metrics, score, user_id
+- user_id: String identifying the property owner (set on POST, validated on PUT/DELETE)
 - Indexes: listing_url (unique), state, (state, city), zip_code
 - Defensive deserialization handles corrupted documents gracefully to prevent API crashes
 - CRUD operations with validation
@@ -67,18 +68,26 @@ The Flask application initializes and coordinates all backend services.
 
 ### Routes Layer (routes/)
 
+**Dual-Path Registration**
+- All routes available at both `/api/v1/*` (new) and legacy `/api/*` paths for backward compatibility
+- Home endpoint returns `api_versions` metadata with supported versions
+
 **properties.py - Property Management**
 - `GET /properties` - List all properties with filtering, pagination, sorting (paginated envelope response)
   - Query parameter validation: all numeric filters validated (returns 400 on malformed input)
   - Pagination bounds: limit clamped [1,100], page clamped >= 1
 - `GET /properties/<id>` - Retrieve single property details
-- `POST /properties` - Create new property listing
+- `POST /properties` - Create new property listing with ownership tracking
+  - Captures `user_id` from JWT identity (identifies property owner)
   - Null/invalid body handling: returns 400 on missing or invalid JSON
-- `PUT /properties/<id>` - Update property information
+- `PUT /properties/<id>` - Update property information with ownership enforcement
   - Null/invalid body handling: returns 400 on missing or invalid JSON
   - Mass assignment prevention: whitelists updatable fields (address, city, state, zip_code, price, bedrooms, bathrooms, sqft, year_built, property_type, lot_size, listing_url, description, images, latitude, longitude)
+  - Ownership enforcement: returns 403 if `user_id` mismatch (backward-compatible for legacy properties without user_id)
 - `DELETE /properties/<id>` - Remove property from system
+  - Ownership enforcement: returns 403 if user is not the property owner (backward-compatible for legacy properties)
 - ObjectId format validation on all ID-based endpoints (returns 400 on invalid IDs)
+- Property ownership model enables per-user property management while maintaining backward compatibility
 
 **analysis.py - Investment Analysis**
 - Composes multiple analysis services
@@ -199,10 +208,11 @@ Analysis services accept (property_obj, market_dict) pairs and return computed r
 ### Utils Layer (utils/)
 
 **auth.py - JWT Token Blocklist**
-- In-memory set-based token blocklist for logout support
+- Redis-backed token blocklist with lazy initialization and in-memory fallback
 - `add_token_to_blocklist(jti)` - Revoke a JWT by its JTI claim
-- `is_token_revoked(jti)` - Check if a token has been revoked
+- `is_token_revoked(jti)` - Check if a token has been revoked (checks Redis first, falls back to in-memory)
 - Integrated with Flask-JWT-Extended's `token_in_blocklist_loader`
+- Gracefully handles Redis unavailability with in-memory fallback
 
 **errors.py - Error Response Helpers**
 - `error_response(message, code, status)` - Structured error JSON responses
@@ -230,12 +240,13 @@ Analysis services accept (property_obj, market_dict) pairs and return computed r
 ## Frontend Architecture
 
 ### Technology Stack
-- **Framework**: React 17 (React Hooks for state management)
-- **Routing**: React Router v5
+- **Framework**: React 18 (React Hooks for state management, createRoot API for DOM rendering)
+- **Routing**: React Router v6 (Routes/element API)
 - **HTTP Client**: Centralized apiClient (services/api.js) with JWT interceptors — all components use this instead of raw axios
 - **Styling**: Tailwind CSS
 - **Charts**: Chart.js via react-chartjs-2
-- **Maps**: Leaflet via react-leaflet
+- **Maps**: Interactive Leaflet maps (raw Leaflet.js, not react-leaflet wrapper)
+- **Testing**: React Testing Library (devDependencies)
 
 ### Routes
 - `/` - Dashboard (property overview and search)
@@ -253,14 +264,14 @@ Analysis services accept (property_obj, market_dict) pairs and return computed r
 - **MapView** - Interactive property location map with XSS prevention (escapeHtml() sanitizes map popups); uses separate useEffect hooks for init (runs once) vs marker update (runs on data change)
 - **MarketMetricsChart** - Market trends visualization
 - **PropertyCard** - Compact property display card
-- **FilterPanel** - Advanced property filtering interface
+- **FilterPanel** - Advanced property filtering interface with programmatically associated form labels (accessibility improvements)
 - **InvestmentSummary** - High-level investment metrics
 - **InvestmentMetrics** - Detailed financial metrics display
 - **PropertyGallery** - Image carousel for property photos
 - **TopMarketsTable** - Market comparison table
 - **ComparisonTable** - Side-by-side property comparison
 - **TaxBenefits** - Tax advantage breakdown
-- **FinancingCalculator** - Loan program comparison tool
+- **FinancingCalculator** - Loan program comparison tool with debounced interest rate calculations
 - **ErrorBoundary** - Component-level error handling to prevent white-screen crashes
 
 ### API Integration (services/api.js)
@@ -296,6 +307,7 @@ Analysis services accept (property_obj, market_dict) pairs and return computed r
   description: String,
   created_at: Date,
   updated_at: Date,
+  user_id: String,
   metrics: {
     roi: Number,
     cap_rate: Number,
@@ -369,14 +381,21 @@ Analysis services accept (property_obj, market_dict) pairs and return computed r
   - Token generation on successful login with configurable expiration (default 1 hour via JWT_ACCESS_TOKEN_EXPIRES)
   - Token validation on protected routes
   - JWT_SECRET_KEY configured and validated at startup
+  - Redis-backed token blocklist for logout support with in-memory fallback
 - **Password Security**
   - Bcrypt hashing via werkzeug.security
   - Salted hashes prevent rainbow table attacks
   - No plaintext passwords stored
+- **Property Ownership Authorization**
+  - PUT /properties/<id> enforces user_id ownership (403 Forbidden if user is not owner)
+  - DELETE /properties/<id> enforces user_id ownership (403 Forbidden if user is not owner)
+  - Backward-compatible: legacy properties without user_id remain accessible
+  - Prevents unauthorized property modifications across users
 
-### Rate Limiting
-- 200 requests per day per IP address
-- 50 requests per hour per IP address
+### Rate Limiting & Caching
+- Redis-backed rate limiting: 200 requests per day, 50 requests per hour per IP address
+- In-memory fallback when Redis unavailable
+- Redis-backed response caching for expensive calculations
 - Protects against brute force and DoS attacks
 
 ### Input Validation & Sanitization
@@ -433,11 +452,12 @@ Analysis services accept (property_obj, market_dict) pairs and return computed r
 ## Deployment
 
 ### Docker Compose Configuration
-- Separate containers for Flask API, React frontend, and MongoDB
+- Separate containers for Flask API, React frontend, MongoDB, and Redis 7 Alpine
 - Network isolation between services
 - Volume mounts for data persistence
 - Environment variable configuration
 - Health checks for container orchestration
+- Redis 7 Alpine for token blocklist, rate limiting, and response caching
 
 ### Production Deployment
 - Gunicorn application server with 4 worker processes
@@ -482,12 +502,29 @@ Analysis services accept (property_obj, market_dict) pairs and return computed r
 - Data scraping error tracking
 - Collection completion notifications
 
+## Testing
+
+### Test Coverage
+- Comprehensive pytest suite with 512 tests across 12 test files
+- Test files: test_models.py, test_auth.py, test_properties.py, test_analysis.py, test_market_analysis.py, test_market_aggregator.py, test_financial_metrics.py, test_opportunity_scoring.py, test_risk_assessment.py, test_tax_benefits.py, test_financing_options.py, test_integration.py
+- 4 new test files added in v1.5.0 for ownership enforcement and Redis integration testing
+- All tests run without MongoDB (fully mocked with MagicMock)
+- No external dependencies required to run test suite
+- Frontend testing via React Testing Library (component unit tests)
+
+### Test Patterns
+- JWT authentication mocked in protected route tests
+- Database operations fully mocked (no live MongoDB required)
+- Financial calculations use pytest.approx() for floating-point comparison
+- Redis availability tested with fallback scenarios
+
 ## Configuration
 
 ### Environment Variables
 - `FLASK_ENV` - Development or production
 - `JWT_SECRET_KEY` - JWT token signing key (required)
 - `MONGODB_URI` - MongoDB connection string
+- `REDIS_URL` - Redis connection string for token blocklist, rate limiting, and caching
 - `REACT_APP_API_URL` - Frontend API endpoint
 - Database connection parameters
 - Rate limiting thresholds

@@ -1,7 +1,7 @@
 # Real Estate Analyzer - Code Map
 
-**Version:** 1.4.0
-**Last Updated:** 2026-03-03
+**Version:** 1.5.0
+**Last Updated:** 2026-03-04
 
 This document provides a comprehensive map of the Real Estate Analyzer codebase, including all source files, their purposes, key classes/functions, and data flows. Use this as a reference for understanding system architecture and navigating the code.
 
@@ -39,16 +39,17 @@ The backend exposes REST endpoints for all operations. The frontend communicates
 ## Dependency Graph
 
 ```
-Frontend (React)
-    ├── App.js (Router entry point)
+Frontend (React 18)
+    ├── App.js (Router entry point with Routes/Route v6)
     ├── services/api.js (API client with interceptors)
     ├── components/
     │   ├── Dashboard (main view)
     │   ├── PropertyDetail (property analysis)
-    │   ├── FinancingCalculator (loan scenario analysis)
+    │   ├── FinancingCalculator (loan scenario analysis with useDebounce)
+    │   ├── FilterPanel (with ARIA accessibility)
     │   ├── MapView (Leaflet map)
     │   └── ErrorBoundary (error handling)
-    └── (supports React Router v5)
+    └── (React 18, react-router-dom v6, no react-leaflet dependency)
 
 Backend (Flask + MongoDB)
     ├── app.py (Flask app, middleware, scheduler)
@@ -85,14 +86,21 @@ Data Flow:
 **Purpose:** Flask application initialization, middleware setup, route registration, scheduler management, and health checks.
 
 **Key Globals:**
-- `__version__ = '1.4.0'`
+- `__version__ = '1.5.0'`
 - `app`: Flask application instance
 - `jwt`: JWTManager for token validation
-- `limiter`: Rate limiter (200 req/day, 50 req/hour)
+- `limiter`: Rate limiter (Redis-backed or in-memory, 200 req/day, 50 req/hour)
 - `cache`: SimpleCache for response caching
+- `redis_client`: Optional Redis connection for distributed caching and rate limiting
 - `_scheduler_thread`: Background task thread for scheduled property/market updates
 - `_scheduler_last_heartbeat`: Timestamp of last scheduler heartbeat
 - `_scheduler_lock`: Thread lock for safe scheduler access
+
+**Configuration Updates (v1.5.0):**
+- Redis connection from `REDIS_URL` env var (optional, falls back to in-memory)
+- Rate limiter and cache use Redis if available for multi-worker deployments
+- API versioning: dual-path route registration (`/api/v1/...` and `/api/...`)
+- `redis>=5.0.0` added to requirements.txt
 
 **Routes Registered:**
 - `GET /` - Home endpoint with version info
@@ -149,6 +157,7 @@ Data Flow:
 **Attributes:**
 ```python
 _id: ObjectId (auto-generated on save)
+user_id: str (username of property owner/creator, optional)
 address: str (required)
 city: str (optional, default: '')
 state: str (optional, default: '')
@@ -274,6 +283,7 @@ Methods:
 - `POST /api/properties` - Create new property (requires JWT)
   - Required fields: address, price, bedrooms, bathrooms, sqft, year_built, property_type, lot_size, listing_url, source
   - Optional fields: city, state, zip_code, latitude, longitude, images, description
+  - Sets user_id from JWT identity (authenticated username)
   - Returns: Created property dict with _id
   - Status: 201 on success, 400 on validation, 500 on error
 
@@ -286,15 +296,19 @@ Methods:
   - Status: 200 on success, 400 if ID invalid, 404 if not found, 500 on error
 
 - `PUT /api/properties/<property_id>` - Update property (requires JWT)
+  - Ownership check: Only property owner (user_id) can update
   - Partial updates allowed (validates only provided fields)
   - Updatable fields: address, city, state, zip_code, price, bedrooms, bathrooms, sqft, year_built, property_type, lot_size, listing_url, source, latitude, longitude, images, description
   - Returns: Updated property dict
-  - Status: 200 on success, 400 on validation, 404 if not found, 500 on error
+  - Status: 200 on success, 400 on validation, 403 if not owner, 404 if not found, 500 on error
+  - Backward-compatible: Works for properties without user_id (created before v1.5.0)
 
 - `DELETE /api/properties/<property_id>` - Delete property (requires JWT)
+  - Ownership check: Only property owner (user_id) can delete
   - Validates ObjectId format
   - Returns: `{message: 'Property deleted successfully'}`
-  - Status: 200 on success, 400 if ID invalid, 404 if not found, 500 on error
+  - Status: 200 on success, 400 if ID invalid, 403 if not owner, 404 if not found, 500 on error
+  - Backward-compatible: Works for properties without user_id (created before v1.5.0)
 
 ---
 
@@ -827,24 +841,32 @@ def __init__(self)
 
 ### File: `/backend/utils/auth.py`
 
-**Purpose:** JWT token blocklist management for logout functionality.
+**Purpose:** JWT token blocklist management for logout functionality with Redis support.
 
 **Globals:**
-- `_jwt_blocklist`: Set of revoked token JTI (JWT ID) claims
+- `_jwt_blocklist`: Set of revoked token JTI (JWT ID) claims (in-memory fallback)
+- `_redis_client`: Optional Redis connection (lazy-initialized)
 
 **Functions:**
+
+- `_get_redis()` - Get or initialize Redis connection
+  - Lazy initialization from REDIS_URL env var
+  - Returns: Redis client instance or None if not configured
+  - Graceful fallback to in-memory if Redis unavailable
 
 - `add_token_to_blocklist(jti)` - Add token to revocation list
   - Called on logout
   - Token identity stored as JTI (unique JWT claim)
+  - Tries Redis first (with TTL = token expiry), falls back to in-memory set
   - Parameter: jti (string)
 
 - `is_token_revoked(jti)` - Check if token is revoked
   - Called by Flask-JWT-Extended @jwt.token_in_blocklist_loader
+  - Checks Redis first, then in-memory set
   - Parameter: jti (string)
   - Returns: Boolean
 
-**Note:** In-memory implementation suitable for single worker. For multi-worker deployments, use Redis-backed blocklist.
+**Note (v1.5.0):** Hybrid implementation with Redis preference for multi-worker deployments. Falls back to in-memory if Redis unavailable. For single-worker dev environments, in-memory blocklist is sufficient.
 
 ---
 
@@ -903,9 +925,10 @@ def __init__(self)
 - `NotFound` - 404 page component
   - Displays 404 message with link to dashboard
 
-- `App` - Main router component
+- `App` - Main router component (React 18 + react-router v6)
   - Wraps app in ErrorBoundary
-  - Sets up React Router with Switch/Route
+  - Sets up React Router with Routes/Route (v6 syntax)
+  - Route component prop → element (v6 JSX syntax)
   - Navigation bar with links
   - Routes:
     - `/` → Dashboard (main view)
@@ -918,16 +941,22 @@ def __init__(self)
 - CORS credentials enabled via axios config
 - Security: Strict-Transport-Security (HSTS) headers
 
+**React 18 Changes (v1.5.0):**
+- index.js: ReactDOM.createRoot() instead of ReactDOM.render()
+- Router: Uses Routes (v6) instead of Switch
+- Route: Uses element prop instead of component
+
 ---
 
 ### File: `/frontend/src/services/api.js`
 
 **Purpose:** Axios HTTP client with authentication and error handling.
 
-**Configuration:**
-- Base URL: `process.env.REACT_APP_API_URL` or `http://localhost:5000/api`
+**Configuration (v1.5.0):**
+- Base URL: `process.env.REACT_APP_API_URL` or `http://localhost:5000/api/v1`
 - Timeout: 10 seconds
 - Default headers: `Content-Type: application/json`
+- Supports both `/api/v1/...` and `/api/...` paths (backend dual-registration)
 
 **Interceptors:**
 
@@ -978,6 +1007,7 @@ logout()                      // POST /auth/logout
 - Summary statistics: property count, avg price, avg ROI, avg cap rate
 - Property cards: Top investment opportunities (max 4)
 - Filter panel: Price, bedrooms, bathrooms, property type, min score
+  - Passes `resultsCount` prop for accessibility (aria-live)
 - Property map: Visual representation of property locations
 - Investment summary: Aggregate metrics
 - Top markets table: Ranked by ROI
@@ -1082,7 +1112,7 @@ else:  #6B7280 (gray)
 
 ### File: `/frontend/src/components/FinancingCalculator.js`
 
-**Purpose:** Interactive financing options calculator with custom parameter adjustment.
+**Purpose:** Interactive financing options calculator with custom parameter adjustment (v1.5.0: useDebounce).
 
 **Props:**
 - `property`: Property object
@@ -1091,11 +1121,15 @@ else:  #6B7280 (gray)
 - `params`: Current parameter values
 - `onAnalyze`: Callback to rerun analysis with new params
 
+**State (v1.5.0):**
+- `sliderValues`: Local slider values for interest rate, down payment, term
+- Debounce delay: 300ms (prevents excessive API calls during slider interaction)
+
 **Features:**
 - Loan option tabs: Conventional (20%, 10%), FHA, VA (if veteran)
 - Option details: loan amount, down payment, interest rate, monthly payment, total interest
 - PMI/MIP/funding fee calculations
-- Customization sliders:
+- Customization sliders (debounced):
   - Down payment percentage (0-50%)
   - Interest rate (2-10%)
   - Loan term (15/20/30 years)
@@ -1108,6 +1142,27 @@ else:  #6B7280 (gray)
   - Tax savings (green)
   - Net monthly cash flow (colored by sign)
 - Local financing programs list
+
+**Performance (v1.5.0):**
+- useDebounce hook: 300ms delay before triggering analysis
+- Prevents excessive re-renders and API calls
+
+---
+
+### File: `/frontend/src/components/FilterPanel.js`
+
+**Purpose:** Interactive filter controls for property search with real-time updates (v1.5.0: ARIA accessibility).
+
+**Accessibility (v1.5.0):**
+- Label `htmlFor` associations with input IDs
+- `aria-label` on filter inputs (e.g., "Minimum price filter")
+- Filter container with `role="group"` and `aria-label="Filter options"`
+- Results counter with `aria-live="polite"` (announces filter results)
+- `resultsCount` prop from parent Dashboard component
+
+**Props:**
+- `onFilterChange(filters)` - Callback on filter update
+- `resultsCount` - Number of matching properties (for aria-live announcement)
 
 ---
 
@@ -1129,17 +1184,21 @@ else:  #6B7280 (gray)
 
 ## Test Coverage Map
 
-**Location:** `/backend/tests/` (367 tests total)
+**Location:** `/backend/tests/` (512 tests total as of v1.5.0)
 
 | Test File | Test Count | Coverage |
 |-----------|-----------|----------|
 | `test_models.py` | 65 | Property/Market models: CRUD, validation, serialization |
-| `test_routes_properties.py` | 72 | Property endpoints: list, create, get, update, delete, filters, pagination |
+| `test_routes_properties.py` | 69 | Property endpoints: list, create, get, update (ownership check), delete (ownership check), filters, pagination |
 | `test_routes_analysis.py` | 68 | Analysis endpoints: property analysis, market analysis, scoring |
 | `test_routes_users.py` | 44 | Auth endpoints: registration, login, logout, validation, rate limiting |
 | `test_services.py` | 65 | Financial, tax, financing, risk, opportunity scoring services |
 | `test_geographic.py` | 28 | Market aggregator: state/city/zip aggregations, top markets |
 | `test_utilities.py` | 25 | Database, validation, error responses, auth blocklist |
+| `test_auth.py` (NEW) | 22 | JWT blocklist: Redis-backed + in-memory fallback, token revocation |
+| `test_data_collection.py` (NEW) | 37 | ZillowScraper, DataCollectionService, property extraction |
+| `test_database.py` (NEW) | 23 | MongoDB connection, auto-reconnect, health checks |
+| `test_scheduler.py` (NEW) | 18 | Scheduled tasks: update_property_data, update_market_data |
 
 **Test Strategy:**
 - All tests fully mocked (no MongoDB required)
@@ -1450,6 +1509,7 @@ Aggregation Queries
 | `JWT_SECRET` | random 32-byte hex | JWT token signing key |
 | `JWT_EXPIRY_SECONDS` | 3600 | Token expiry (1 hour) |
 | `DATABASE_URL` | (required if DB used) | MongoDB connection string |
+| `REDIS_URL` | (optional) | Redis connection string (e.g., redis://localhost:6379). If omitted, uses in-memory blocklist |
 | `CORS_ORIGINS` | `http://localhost:3000` | Comma-separated allowed origins |
 | `FLASK_DEBUG` | `false` | Enable Flask debug mode |
 
@@ -1464,16 +1524,18 @@ Aggregation Queries
 JWT_SECRET=your_generated_secret_key_here
 JWT_EXPIRY_SECONDS=3600
 DATABASE_URL=mongodb://localhost:27017/realestate
+REDIS_URL=redis://localhost:6379/0
 CORS_ORIGINS=http://localhost:3000,https://yourdomain.com
 FLASK_DEBUG=false
 ```
 
 ### Flask Configuration
 
-**Security:**
+**Security (v1.5.0):**
 - `MAX_CONTENT_LENGTH`: 16MB (max request body)
 - `JWT_SECRET_KEY`: From JWT_SECRET env var
-- Rate limiting: 200 req/day, 50 req/hour (per IP)
+- Rate limiting: 200 req/day, 50 req/hour (per IP, Redis-backed if available)
+- API versioning: Routes registered at both `/api/v1/...` and `/api/...` paths
 
 **Database:**
 - Connection timeout: 5 seconds
@@ -1503,6 +1565,39 @@ FLASK_DEBUG=false
 - `markets.zip_code`
 - `markets.(state, city)` (compound)
 - `users.username` (unique)
+
+---
+
+## Docker & Infrastructure (v1.5.0)
+
+**Services in docker-compose.yml:**
+
+1. **Flask Backend** (port 5000)
+   - Gunicorn WSGI server
+   - Auto-connects to MongoDB and Redis (if running)
+   - Health check: GET /health/ready
+
+2. **MongoDB** (port 27017)
+   - Database for properties, markets, users
+   - Auto-index creation on connection
+
+3. **Redis** (port 6379, NEW v1.5.0)
+   - Cache backend
+   - JWT token blocklist (distributed across workers)
+   - Rate limiter state (for multi-worker deployments)
+   - Image: redis:7-alpine
+
+4. **React Frontend** (port 3000)
+   - Node.js development server
+   - Hot reload enabled
+   - NODE_OPTIONS=--openssl-legacy-provider for Node v24
+
+**Environment Variables (docker-compose):**
+```yaml
+REDIS_URL: redis://redis:6379/0
+DATABASE_URL: mongodb://mongodb:27017/realestate
+FLASK_DEBUG: false
+```
 
 ---
 
@@ -1540,38 +1635,42 @@ real-estate-analyzer/
 │   │   └── errors.py (3 lines)
 │   └── tests/
 │       ├── test_models.py (65 tests)
-│       ├── test_routes_properties.py (72 tests)
+│       ├── test_routes_properties.py (69 tests) - includes ownership checks v1.5.0
 │       ├── test_routes_analysis.py (68 tests)
 │       ├── test_routes_users.py (44 tests)
 │       ├── test_services.py (65 tests)
 │       ├── test_geographic.py (28 tests)
-│       └── test_utilities.py (25 tests)
+│       ├── test_utilities.py (25 tests)
+│       ├── test_auth.py (22 tests, NEW v1.5.0) - JWT blocklist Redis + in-memory
+│       ├── test_data_collection.py (37 tests, NEW v1.5.0) - ZillowScraper, DataCollectionService
+│       ├── test_database.py (23 tests, NEW v1.5.0) - MongoDB connection management
+│       └── test_scheduler.py (18 tests, NEW v1.5.0) - Scheduled tasks
 │
 ├── frontend/
 │   ├── public/
 │   │   └── index.html
 │   ├── src/
-│   │   ├── index.js
+│   │   ├── index.js (React 18 createRoot API, v1.5.0)
 │   │   ├── index.css (Tailwind)
-│   │   ├── App.js (116 lines)
+│   │   ├── App.js (React Router v6 Routes/element, 116 lines)
 │   │   ├── services/
-│   │   │   └── api.js (58 lines)
+│   │   │   └── api.js (Base URL: /api/v1, 58 lines)
 │   │   └── components/
-│   │       ├── Dashboard.js (183 lines)
+│   │       ├── Dashboard.js (passes resultsCount to FilterPanel, 183 lines)
 │   │       ├── PropertyDetail.js (339 lines)
 │   │       ├── MapView.js (120 lines)
-│   │       ├── FinancingCalculator.js (235 lines)
+│   │       ├── FinancingCalculator.js (useDebounce hook, 235 lines, v1.5.0)
+│   │       ├── FilterPanel.js (ARIA accessibility, v1.5.0)
 │   │       ├── ErrorBoundary.js (42 lines)
 │   │       ├── PropertyCard.js
 │   │       ├── InvestmentSummary.js
 │   │       ├── MarketMetricsChart.js
-│   │       ├── FilterPanel.js
 │   │       ├── PropertyGallery.js
 │   │       ├── InvestmentMetrics.js
 │   │       ├── TaxBenefits.js
 │   │       ├── TopMarketsTable.js
 │   │       └── ComparisonTable.js
-│   └── package.json
+│   └── package.json (React 18, react-router-dom 6, axios 1.7, @testing-library/react 14, v1.5.0)
 │
 ├── docker-compose.yml
 ├── Dockerfile
@@ -1587,7 +1686,10 @@ real-estate-analyzer/
 
 ## Quick Reference: Key Decision Points
 
-**When working with Property objects:**
+**When working with Property objects (v1.5.0):**
+- Set `user_id` on POST: `user_id = get_jwt_identity()` (current username)
+- Check ownership on PUT/DELETE: return 403 if `property.user_id != current_user`
+- Backward-compatible: properties without user_id can still be updated (created before v1.5.0)
 - Always convert to dict before passing to analysis services: `property.to_dict()`
 - Preserve ObjectId as ObjectId in from_dict() (don't stringify)
 - Use .get() with defaults in from_dict() for defensive parsing
@@ -1600,17 +1702,32 @@ real-estate-analyzer/
 **When handling API errors:**
 - Use error_response(message, code, status) for consistency
 - Validate ObjectId format early: `if not is_valid_objectid(id): return 400`
+- Return 403 Forbidden for ownership violations (v1.5.0)
 - Always handle 404 by checking find result before using
 
-**When working with the frontend:**
+**When working with JWT tokens (v1.5.0):**
+- Token blocklist uses Redis if available, falls back to in-memory
+- Call `_get_redis()` to check Redis availability lazily
+- Use `add_token_to_blocklist(jti)` on logout (abstracts Redis/in-memory)
+
+**When working with the frontend (v1.5.0):**
+- Use React 18 createRoot API in index.js
+- Use react-router v6 Routes/element syntax (not Switch/component)
 - Use api.js for all backend calls (never fetch directly)
 - Axios interceptor handles 401 redirects and token additions
+- FilterPanel receives `resultsCount` prop for aria-live announcements
+- FinancingCalculator uses useDebounce hook (300ms) for parameter changes
 - useState and useEffect for async data loading patterns
 
 **For database queries:**
 - Always call get_db() (never use cached connection directly)
 - Indexes are created on startup automatically
 - Connection auto-reconnects on failure
+
+**For API versioning (v1.5.0):**
+- Routes registered at both `/api/v1/...` and `/api/...` paths
+- Frontend api.js base URL: `/api/v1` (with fallback to `/api`)
+- Dual registration enables gradual migration
 
 ---
 

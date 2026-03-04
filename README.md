@@ -46,24 +46,27 @@ A comprehensive full-stack web application for analyzing residential real estate
 - **Framework**: Python 3.9+, Flask 2.x, Flask-RESTful
 - **Authentication**: Flask-JWT-Extended with bcrypt password hashing
 - **Database**: MongoDB (PyMongo 4.x) with connection pooling and auto-reconnect
-- **Caching**: Flask-Caching for response optimization
-- **Rate Limiting**: Flask-Limiter to prevent API abuse
+- **Caching**: Redis 7 for response caching and distributed rate limiting
+- **Rate Limiting**: Flask-Limiter with Redis backend for distributed rate limiting
+- **JWT Blocklist**: Redis-backed JWT token blocklist for logout functionality
 - **CORS**: Flask-CORS for cross-origin requests
 - **Async Data Collection**: aiohttp with backoff retry strategy
 - **Background Jobs**: APScheduler for scheduled data updates
 - **Server**: Gunicorn WSGI server (4 workers, production-ready)
-- **Testing**: pytest with 405 tests, 100% pass rate
+- **Testing**: pytest with 512 tests, 100% pass rate
 - **Input Validation**: Parameter bounds, username validation, null body handling
 - **Security Headers**: CSP, HSTS, X-Frame-Options, X-Content-Type-Options
 
 ### Frontend
-- **Framework**: React 17 with React Router v5
+- **Framework**: React 18 with React Router v6 and createRoot
 - **Styling**: Tailwind CSS with responsive design
-- **Visualization**: Chart.js (via react-chartjs-2) and Leaflet (via react-leaflet)
+- **Visualization**: Chart.js (via react-chartjs-2) and Leaflet (direct integration)
 - **HTTP Client**: apiClient service with JWT auth and error handling
-- **Build**: Create React App with webpack bundling
+- **Build**: Create React App (react-scripts 4.0.3) with webpack bundling
+- **Dependencies**: axios 1.7, react-router-dom 6.x (installed with `npm install --legacy-peer-deps`)
 - **Error Handling**: ErrorBoundary component for render error recovery
 - **Components**: 404 route for unknown paths, Leaflet map memory leak fixes
+- **Node.js Compatibility**: Node.js v24 requires `NODE_OPTIONS=--openssl-legacy-provider`
 
 ### Deployment
 - **Containerization**: Docker with multi-stage builds
@@ -137,15 +140,24 @@ real-estate-analyzer/
 │   │   │                                   # Thread-safe, auto-reconnect
 │   │   │                                   # Exponential backoff, URI parsing
 │   │   │
+│   │   ├── auth.py                         # JWT token utilities and helpers
+│   │   │
+│   │   ├── errors.py                       # Custom error classes and handling
+│   │   │
 │   │   └── validation.py                   # Shared ObjectId and input validation
 │   │
 │   ├── tests/
+│   │   ├── test_auth.py                    # JWT auth and token validation (22 tests)
+│   │   ├── test_data_collection.py         # Zillow scraper and data collection (37 tests)
+│   │   ├── test_database.py                # MongoDB model methods (23 tests)
 │   │   ├── test_financial_metrics.py       # ROI, cap rate calculations
 │   │   ├── test_financing_options.py       # Loan comparison logic
 │   │   ├── test_opportunity_scoring.py     # Scoring algorithm
 │   │   ├── test_risk_assessment.py         # Risk evaluation
-│   │   ├── test_routes.py                  # API endpoint testing
+│   │   ├── test_routes.py                  # API endpoint testing (69 tests)
+│   │   ├── test_scheduler.py               # APScheduler and background jobs (18 tests)
 │   │   ├── test_tax_benefits.py            # Tax deduction calculations
+│   │   ├── test_validation.py              # Shared validation utilities (7 tests)
 │   │   └── conftest.py                     # pytest fixtures and setup
 │   │
 │   ├── Dockerfile                          # Multi-stage build for backend
@@ -201,15 +213,17 @@ real-estate-analyzer/
 
 ## API Reference
 
+**Note**: All endpoints are available at both `/api/*` (backward compatible) and `/api/v1/*` (preferred).
+
 ### Properties Endpoints
 
 | Method | Endpoint | Description | Auth | Query Params |
 |--------|----------|-------------|------|--------------|
 | GET | `/api/properties` | List properties with filtering & pagination | No | `minPrice`, `maxPrice`, `minBedrooms`, `minBathrooms`, `propertyType`, `city`, `state`, `zipCode`, `minScore`, `limit`, `page`, `sortBy`, `sortOrder` |
-| POST | `/api/properties` | Create new property | Yes | — |
+| POST | `/api/properties` | Create new property (user_id captured from JWT) | Yes | — |
 | GET | `/api/properties/<id>` | Get property by ID | No | — |
-| PUT | `/api/properties/<id>` | Update property | Yes | — |
-| DELETE | `/api/properties/<id>` | Delete property | Yes | — |
+| PUT | `/api/properties/<id>` | Update property (owner only, 403 if not owner) | Yes | — |
+| DELETE | `/api/properties/<id>` | Delete property (owner only, 403 if not owner) | Yes | — |
 
 **GET /api/properties Example**:
 ```bash
@@ -374,9 +388,10 @@ docker-compose down
 
 The docker-compose configuration includes:
 - **MongoDB**: Running on port 27017 with health checks
+- **Redis**: Running on port 6379 for caching, rate limiting, and JWT blocklist
 - **Backend**: Python Flask on port 5000 with Gunicorn (4 workers)
 - **Frontend**: React development server on port 3000
-- **Volumes**: MongoDB data persisted to `mongodb_data/`
+- **Volumes**: MongoDB data persisted to `mongodb_data/`, Redis data persisted to `redis_data/`
 
 ### Option 2: Manual Installation
 
@@ -418,11 +433,11 @@ The backend will start at http://localhost:5000
 # In a new terminal, from project root
 cd frontend
 
-# Install Node dependencies
-npm install
+# Install Node dependencies (--legacy-peer-deps required due to peer dependency conflicts)
+npm install --legacy-peer-deps
 
-# Start development server
-npm start
+# Start development server (Node.js v24 requires NODE_OPTIONS)
+NODE_OPTIONS=--openssl-legacy-provider npm start
 ```
 
 The frontend will open at http://localhost:3000
@@ -452,7 +467,7 @@ python -c "from services.data_collection.data_collection_service import DataColl
 ```bash
 cd backend
 
-# Run all 405 tests with verbose output
+# Run all 512 tests with verbose output
 pytest tests/ -v
 
 # Run with coverage report
@@ -467,18 +482,22 @@ pytest tests/ -k "roi" -v
 
 ### Test Files
 
-- **test_financial_metrics.py**: ROI, cap rate, cash-on-cash, break-even calculations; includes zero-investment ROI guard test
+- **test_auth.py**: JWT authentication, token validation, login/logout flows (22 tests)
+- **test_data_collection.py**: Zillow scraper, async data collection, scheduling (37 tests)
+- **test_database.py**: MongoDB model methods, CRUD operations, indexes (23 tests)
+- **test_financial_metrics.py**: ROI, cap rate, cash-on-cash, break-even calculations
 - **test_financing_options.py**: Conventional, FHA, VA loan comparisons
 - **test_opportunity_scoring.py**: 0-100 composite scoring algorithm
 - **test_risk_assessment.py**: Risk evaluation across dimensions
-- **test_routes.py**: 62 API endpoint tests (24 base + 23 v1.3.0 + 15 v1.4.0)
+- **test_routes.py**: 69 API endpoint tests (24 base + 23 v1.3.0 + 15 v1.4.0 + 7 v1.5.0)
+- **test_scheduler.py**: APScheduler background jobs, watchdog thread (18 tests)
 - **test_tax_benefits.py**: Depreciation and tax deduction calculations
-- **test_validation.py**: 7 tests for shared validation utility (ObjectId, parameters, username)
+- **test_validation.py**: Shared validation utility (ObjectId, parameters, username)
 - **conftest.py**: pytest fixtures and MongoDB test setup
 
 ### Test Coverage
 
-The project maintains **100% test pass rate** with 405 tests covering:
+The project maintains **100% test pass rate** with 512 tests covering:
 - Financial calculation accuracy
 - API endpoint behavior
 - Authentication flows
@@ -493,6 +512,9 @@ Create a `.env` file in the project root with the following variables:
 ```bash
 # Database Configuration
 DATABASE_URL=mongodb://localhost:27017/realestate
+
+# Redis Configuration (for caching, rate limiting, JWT blocklist)
+REDIS_URL=redis://localhost:6379/0
 
 # JWT Secret (CRITICAL - see Security section below)
 # Generate with: python -c "import secrets; print(secrets.token_hex(32))"
@@ -524,6 +546,7 @@ CACHE_DEFAULT_TIMEOUT=300
 ```bash
 # .env
 DATABASE_URL=mongodb://mongo:27017/realestate
+REDIS_URL=redis://redis:6379/0
 JWT_SECRET=a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6
 REACT_APP_API_URL=http://localhost:5000/api
 FLASK_DEBUG=true
@@ -566,30 +589,32 @@ JWT_SECRET=a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6
 
 1. **Bcrypt Passwords**: All user passwords are hashed with bcrypt (12 rounds)
 2. **JWT Tokens**: Tokens expire after configurable period (default: 1 hour)
-3. **Rate Limiting**: API endpoints protected with configurable rate limits (default: 100 req/hour)
-4. **CORS Configuration**: Restricted to configured frontend origins
-5. **Content-Security-Policy**: CSP headers on all responses preventing XSS attacks
-6. **HTML Escaping**: Map popups use `escapeHtml()` helper to prevent DOM-based XSS
-7. **Input Validation**:
+3. **JWT Blocklist**: Redis-backed token blocklist for immediate logout enforcement
+4. **Property Ownership**: PUT and DELETE operations require user ownership (403 Forbidden if not owner)
+5. **Rate Limiting**: API endpoints protected with Redis-backed distributed rate limiting (default: 100 req/hour)
+6. **CORS Configuration**: Restricted to configured frontend origins
+7. **Content-Security-Policy**: CSP headers on all responses preventing XSS attacks
+8. **HTML Escaping**: Map popups use `escapeHtml()` helper to prevent DOM-based XSS
+9. **Input Validation**:
    - ObjectId format validation on all ID-based endpoints (400 on invalid)
    - Username: 3-64 chars, alphanumeric + `_.-` only
    - Analysis parameters with bounds: term_years [1,40], holding_period [1,30], interest_rate [0.001,0.30]
    - Listing URL validation: only `http://` and `https://` schemes allowed
    - Pagination bounds: limit [1,100], page >= 1
    - Query parameter injection prevention on numeric filters
-8. **Null Body Handling**: POST/PUT endpoints return 400 on missing or invalid JSON body
-9. **Mass Assignment Prevention**: PUT properties whitelists updatable fields only
-10. **Database Connection**: Secure MongoDB connection with authentication support
-11. **Security Headers**:
+10. **Null Body Handling**: POST/PUT endpoints return 400 on missing or invalid JSON body
+11. **Mass Assignment Prevention**: PUT properties whitelists updatable fields only
+12. **Database Connection**: Secure MongoDB connection with authentication support
+13. **Security Headers**:
     - Content-Security-Policy (CSP) prevents inline script execution
     - X-Content-Type-Options: nosniff prevents MIME sniffing
     - X-Frame-Options: DENY prevents clickjacking
     - X-XSS-Protection: 1; mode=block for legacy browser support
     - Referrer-Policy: strict-origin-when-cross-origin controls referrer leaking
     - HSTS: Enforces HTTPS in production
-12. **Request Logging**: All API requests logged for auditing
-13. **Environment Separation**: Dev, staging, and production have separate configs
-14. **HTTPS in Production**: Always use HTTPS for JWT token transmission
+14. **Request Logging**: All API requests logged for auditing
+15. **Environment Separation**: Dev, staging, and production have separate configs
+16. **HTTPS in Production**: Always use HTTPS for JWT token transmission
 
 ### Deployment Security Checklist
 
