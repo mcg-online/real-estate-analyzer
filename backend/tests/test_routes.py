@@ -486,7 +486,7 @@ class TestUserLogin:
         """Correct username and password returns HTTP 200 with an access token."""
         from werkzeug.security import generate_password_hash
 
-        hashed = generate_password_hash("correctpassword")
+        hashed = generate_password_hash("correctpassword", method="pbkdf2:sha256")
         stored_user = {"username": "testuser", "password": hashed}
 
         mock_users = MagicMock()
@@ -506,7 +506,7 @@ class TestUserLogin:
         """Successful login response body contains an access_token."""
         from werkzeug.security import generate_password_hash
 
-        hashed = generate_password_hash("correctpassword")
+        hashed = generate_password_hash("correctpassword", method="pbkdf2:sha256")
         stored_user = {"username": "testuser", "password": hashed}
 
         mock_users = MagicMock()
@@ -528,7 +528,7 @@ class TestUserLogin:
         """An incorrect password returns HTTP 401."""
         from werkzeug.security import generate_password_hash
 
-        hashed = generate_password_hash("realpassword")
+        hashed = generate_password_hash("realpassword", method="pbkdf2:sha256")
         stored_user = {"username": "testuser", "password": hashed}
 
         mock_users = MagicMock()

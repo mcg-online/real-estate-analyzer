@@ -233,7 +233,7 @@ class TestUserLifecycleFlow:
     def test_login_after_register_returns_token(self, client: Any) -> None:
         """Step 2: Login with correct credentials must return an access_token."""
         from werkzeug.security import generate_password_hash
-        hashed = generate_password_hash("Lifecycle1Pass!")
+        hashed = generate_password_hash("Lifecycle1Pass!", method="pbkdf2:sha256")
         mock_db = _make_user_db("lifecycle_user", hashed)
         with patch("routes.users.get_db", return_value=mock_db):
             resp = client.post(
@@ -320,7 +320,7 @@ class TestUserLifecycleFlow:
     def test_login_wrong_password_returns_401(self, client: Any) -> None:
         """Login with a wrong password must return 401 Unauthorized."""
         from werkzeug.security import generate_password_hash
-        hashed = generate_password_hash("CorrectPass1!")
+        hashed = generate_password_hash("CorrectPass1!", method="pbkdf2:sha256")
         mock_db = _make_user_db("lifecycle_user", hashed)
         with patch("routes.users.get_db", return_value=mock_db):
             resp = client.post(

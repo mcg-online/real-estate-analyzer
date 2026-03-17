@@ -87,7 +87,7 @@ class UserRegistration(Resource):
             if users.find_one({'username': username}):
                 return {'message': 'Username already exists'}, 409
 
-            password_hash = generate_password_hash(password)
+            password_hash = generate_password_hash(password, method='pbkdf2:sha256')
             users.insert_one({'username': username, 'password': password_hash})
 
             logger.info("Registered new user: %s", username)

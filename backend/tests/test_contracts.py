@@ -667,7 +667,7 @@ class TestLoginContract:
         db = MagicMock()
         db.__getitem__.return_value.find_one.return_value = {
             "username": "testuser",
-            "password": generate_password_hash("Password1"),
+            "password": generate_password_hash("Password1", method="pbkdf2:sha256"),
         }
         mock_get_db.return_value = db
 
@@ -687,7 +687,7 @@ class TestLoginContract:
         db = MagicMock()
         db.__getitem__.return_value.find_one.return_value = {
             "username": "testuser",
-            "password": generate_password_hash("Password1"),
+            "password": generate_password_hash("Password1", method="pbkdf2:sha256"),
         }
         mock_get_db.return_value = db
 
@@ -708,7 +708,7 @@ class TestLoginContract:
         db = MagicMock()
         db.__getitem__.return_value.find_one.return_value = {
             "username": "testuser",
-            "password": generate_password_hash("Password1"),
+            "password": generate_password_hash("Password1", method="pbkdf2:sha256"),
         }
         mock_get_db.return_value = db
 
